@@ -16,7 +16,7 @@ import type { CandleSeries, DrawObject, HLine, MarkerSeries, OutputCollector, Pl
 import type { Candle } from '../types/candle';
 import { pineColorToRgba } from './color';
 import { DrawingsPrimitive, drawingsPriceExtent, drawingsRightExtent } from './drawings';
-import { FillsPrimitive, resolveFills } from './fills';
+import { FillsPrimitive, resolveFills, type ResolvedFill } from './fills';
 import { BackgroundPrimitive } from './backgrounds';
 
 const STEP_STYLES = new Set(['stepline', 'steplinebr', 'stepline_diamond']);
@@ -73,6 +73,18 @@ function lineTypeFor(options: Record<string, unknown>): LineType {
 
 function isVisible(options: Record<string, unknown>): boolean {
   return options.display !== 'none';
+}
+
+/**
+ * `force_overlay = true` — Pine v6's per-output escape hatch, putting one plot/fill/drawing on
+ * the PRICE pane even though its indicator is `overlay = false`.
+ *
+ * An oscillator that also marks price-level zones relies on this. Ignore it and those
+ * price-scaled outputs land in the oscillator's pane, where they both vanish into a wildly
+ * wrong scale and wreck the pane's own autoscale.
+ */
+function forcesOverlay(options: Record<string, unknown>): boolean {
+  return options.force_overlay === true;
 }
 
 function seriesLegendColor(colors: readonly (string | null)[]): string {
@@ -267,8 +279,8 @@ export class PlotRenderer {
   private paneHeightSet = false;
   private drawingsPrimitive: DrawingsPrimitive | null = null;
   private drawingsHost: HostSeries | null = null;
-  private fillsPrimitive: FillsPrimitive | null = null;
-  private fillsHost: HostSeries | null = null;
+  /** One fills primitive per pane — `force_overlay` can split a script's fills across both. */
+  private fillsByPane = new Map<number, { primitive: FillsPrimitive; host: HostSeries }>();
   private backgroundPrimitive: BackgroundPrimitive | null = null;
   private backgroundHost: HostSeries | null = null;
   private markersPlugin: ISeriesMarkersPluginApi<Time> | null = null;
@@ -296,10 +308,16 @@ export class PlotRenderer {
     // Only matters when the pane ends up with no plot to host on; computing it is cheap and
     // paneHostFor is reached from four different syncs, so resolve it once up front.
     this.hostExtent = paneIndex === OVERLAY_PANE ? null : drawingsPriceExtent(drawings);
-    this.syncPlots(outputs.plots, candles, paneIndex, seen);
+    // Resolved once: syncFills needs the same answer syncPlots reached, since a fill lives on
+    // whichever pane its two bounding plots went to.
+    const plotPanes = new Map<number, number>();
+    for (const [id, plot] of outputs.plots) {
+      plotPanes.set(id, forcesOverlay(plot.options) ? OVERLAY_PANE : paneIndex);
+    }
+    this.syncPlots(outputs.plots, candles, paneIndex, seen, plotPanes);
     this.syncCandles(outputs.candles, candles, paneIndex, seen);
     this.syncBackground(outputs, candles, paneIndex, seen);
-    this.syncFills(outputs, candles, paneIndex, seen);
+    this.syncFills(outputs, candles, paneIndex, seen, plotPanes);
     this.syncHlines(outputs.hlines, candles, paneIndex, seen);
     this.syncMarkers(outputs.markers, candles, paneIndex, seen);
     this.syncDrawings(drawings, candles, paneIndex, seen);
@@ -342,8 +360,13 @@ export class PlotRenderer {
     candles: readonly Candle[],
     paneIndex: number,
     seen: Set<string>,
+    plotPanes: ReadonlyMap<number, number>,
   ): void {
+    let usedSeparatePane = false;
+
     for (const [id, plot] of plots) {
+      const plotPane = plotPanes.get(id) ?? paneIndex;
+      if (plotPane !== OVERLAY_PANE) usedSeparatePane = true;
       const style = typeof plot.options.style === 'string' ? plot.options.style : '';
       // A `*br` plot becomes one series per unbroken run; everything else stays a single
       // series whose `na` gaps are joined, which is what the non-`br` styles mean.
@@ -358,9 +381,9 @@ export class PlotRenderer {
         seen.add(key);
         const existing = this.tracked.get(key);
         const api =
-          existing?.kind === 'plot' && existing.paneIndex === paneIndex
+          existing?.kind === 'plot' && existing.paneIndex === plotPane
             ? existing.api
-            : this.recreatePlotSeries(key, existing, paneIndex);
+            : this.recreatePlotSeries(key, existing, plotPane);
 
         api.applyOptions({
           // One legend entry and one price label for the whole plot, not one per run.
@@ -372,10 +395,12 @@ export class PlotRenderer {
           lastValueVisible: run === runs.length - 1,
         });
         api.setData(points);
-        this.tracked.set(key, { kind: 'plot', paneIndex, api, visible });
+        this.tracked.set(key, { kind: 'plot', paneIndex: plotPane, api, visible });
       });
     }
-    if (paneIndex !== OVERLAY_PANE && plots.size > 0) this.ensurePaneHeight();
+    // Only grow the lower pane if something actually landed there — a script whose every plot
+    // is force_overlay leaves it empty.
+    if (usedSeparatePane) this.ensurePaneHeight();
   }
 
   private recreatePlotSeries(key: string, existing: Tracked | undefined, paneIndex: number): ISeriesApi<'Line'> {
@@ -562,29 +587,45 @@ export class PlotRenderer {
     candles: readonly Candle[],
     paneIndex: number,
     seen: Set<string>,
+    plotPanes: ReadonlyMap<number, number>,
   ): void {
     const resolved = resolveFills(outputs.fills, outputs.plots, outputs.hlines, candles.length);
-    if (resolved.length === 0) {
-      this.detachFills();
-      return;
+
+    // A fill belongs wherever its bounding plots went, so `force_overlay` on those carries the
+    // fill along with them. An hline boundary is not in the map and keeps the script's pane.
+    const byPane = new Map<number, ResolvedFill[]>();
+    for (const fill of resolved) {
+      const pane = plotPanes.get(fill.region.plot1) ?? plotPanes.get(fill.region.plot2) ?? paneIndex;
+      const bucket = byPane.get(pane);
+      if (bucket) bucket.push(fill);
+      else byPane.set(pane, [fill]);
     }
 
-    const host = this.paneHostFor(paneIndex, candles, seen);
-    if (this.fillsHost !== host) {
-      this.detachFills();
-      this.fillsPrimitive = new FillsPrimitive();
-      this.fillsHost = host;
-      host.attachPrimitive(this.fillsPrimitive);
+    for (const [pane, entry] of this.fillsByPane) {
+      if (!byPane.has(pane)) {
+        entry.host.detachPrimitive(entry.primitive);
+        this.fillsByPane.delete(pane);
+      }
     }
-    this.fillsPrimitive?.setData(resolved, candles.length);
+
+    for (const [pane, fills] of byPane) {
+      const host = this.paneHostFor(pane, candles, seen);
+      let entry = this.fillsByPane.get(pane);
+      if (!entry || entry.host !== host) {
+        if (entry) entry.host.detachPrimitive(entry.primitive);
+        entry = { primitive: new FillsPrimitive(), host };
+        host.attachPrimitive(entry.primitive);
+        this.fillsByPane.set(pane, entry);
+      }
+      entry.primitive.setData(fills, candles.length);
+    }
   }
 
   private detachFills(): void {
-    if (this.fillsPrimitive && this.fillsHost) {
-      this.fillsHost.detachPrimitive(this.fillsPrimitive);
+    for (const entry of this.fillsByPane.values()) {
+      entry.host.detachPrimitive(entry.primitive);
     }
-    this.fillsPrimitive = null;
-    this.fillsHost = null;
+    this.fillsByPane.clear();
   }
 
   /** `bgcolor()` layers, painted as full-height vertical bands behind everything else. */
