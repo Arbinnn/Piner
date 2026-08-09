@@ -45,6 +45,40 @@ function textSizePx(value: unknown): number {
   return 11;
 }
 
+/**
+ * `label.style_*` values that are a MARKER rather than a text callout. These carry no text —
+ * a volume-bubble script sets `text = ""` and varies `size` instead — so they must draw on
+ * their own rather than being skipped as an empty label.
+ */
+const SHAPE_STYLES = new Set([
+  'circle',
+  'square',
+  'diamond',
+  'triangleup',
+  'triangledown',
+  'arrowup',
+  'arrowdown',
+  'cross',
+  'xcross',
+  'flag',
+]);
+
+/** Marker radius in pixels per Pine `size.*`. Tuning knob: TradingView's bubbles run visibly
+ *  larger than text of the same size name, so these are not the `TEXT_SIZE_PX` values. */
+const SHAPE_RADIUS_PX: Record<string, number> = {
+  tiny: 5,
+  small: 10,
+  normal: 16,
+  large: 24,
+  huge: 34,
+};
+
+function shapeRadiusPx(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value / 2;
+  if (typeof value === 'string' && value in SHAPE_RADIUS_PX) return SHAPE_RADIUS_PX[value];
+  return SHAPE_RADIUS_PX.normal;
+}
+
 function applyLineStyle(ctx: CanvasRenderingContext2D, style: string, width: number): void {
   ctx.lineWidth = width;
   if (style === 'dashed') ctx.setLineDash([width * 4, width * 3]);
@@ -342,28 +376,89 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     const y = geometry.y(props.y);
     if (x === null || y === null) return;
 
+    const style = str(props.style, 'label_down');
+    if (SHAPE_STYLES.has(style)) {
+      this.drawLabelShape(ctx, style, props, x, y);
+      return;
+    }
+
     const text = typeof props.text === 'string' ? props.text : '';
     if (text.length === 0) return;
 
-    const style = str(props.style, 'label_down');
-    const below = style.includes('up');
-    ctx.font = '11px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = below ? 'top' : 'bottom';
+    const fontSize = textSizePx(props.size);
+    ctx.font = `${fontSize}px system-ui, sans-serif`;
 
     const padding = 4;
-    const metrics = ctx.measureText(text);
-    const boxWidth = metrics.width + padding * 2;
-    const boxHeight = 16;
-    const offset = below ? 6 : -6;
-    const boxY = below ? y + offset : y + offset - boxHeight;
+    const gap = 6;
+    const boxWidth = ctx.measureText(text).width + padding * 2;
+    const boxHeight = fontSize + padding * 2;
+
+    // The style names where the POINTER sits, so the body goes the opposite way: `label_left`
+    // points left and its body extends right. Anything with neither hint is centred on the anchor.
+    const boxX = style.includes('left')
+      ? x + gap
+      : style.includes('right')
+        ? x - gap - boxWidth
+        : x - boxWidth / 2;
+    const boxY = style.includes('up')
+      ? y + gap
+      : style.includes('down')
+        ? y - gap - boxHeight
+        : y - boxHeight / 2;
 
     if (typeof props.color === 'string') {
       ctx.fillStyle = pineColorToRgba(props.color);
-      ctx.fillRect(x - boxWidth / 2, boxY, boxWidth, boxHeight);
+      ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
     }
     ctx.fillStyle = pineColorToRgba(typeof props.textcolor === 'string' ? props.textcolor : '#D1D4DCFF');
-    ctx.fillText(text, x, below ? boxY + padding : boxY + boxHeight - padding);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, boxX + boxWidth / 2, boxY + boxHeight / 2);
+  }
+
+  /** A marker-style label: filled shape centred on the anchor, sized by Pine's `size.*`. */
+  private drawLabelShape(
+    ctx: CanvasRenderingContext2D,
+    style: string,
+    props: Record<string, unknown>,
+    x: number,
+    y: number,
+  ): void {
+    const r = shapeRadiusPx(props.size);
+    ctx.fillStyle = pineColorToRgba(typeof props.color === 'string' ? props.color : null);
+    ctx.beginPath();
+
+    switch (style) {
+      case 'circle':
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        break;
+      case 'diamond':
+        ctx.moveTo(x, y - r);
+        ctx.lineTo(x + r, y);
+        ctx.lineTo(x, y + r);
+        ctx.lineTo(x - r, y);
+        break;
+      case 'triangleup':
+      case 'arrowup':
+        ctx.moveTo(x, y - r);
+        ctx.lineTo(x + r, y + r);
+        ctx.lineTo(x - r, y + r);
+        break;
+      case 'triangledown':
+      case 'arrowdown':
+        ctx.moveTo(x, y + r);
+        ctx.lineTo(x + r, y - r);
+        ctx.lineTo(x - r, y - r);
+        break;
+      default:
+        // square / cross / xcross / flag — a filled square is wrong in detail but visible,
+        // which beats the silent drop these used to get.
+        ctx.rect(x - r, y - r, r * 2, r * 2);
+        break;
+    }
+
+    ctx.closePath();
+    ctx.fill();
   }
 
   private timeToLogical(timeMs: number): number {

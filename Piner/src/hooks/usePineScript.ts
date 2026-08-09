@@ -119,7 +119,9 @@ export function usePineScript({ candles, bars, ready, rendererRef }: UsePineScri
         // A script whose every plot is `display.none` and which draws nothing renders an
         // empty chart even though it ran correctly — say so rather than leave it a mystery.
         const visiblePlots = [...outputs.plots.values()].filter((p) => p.options.display !== 'none').length;
-        const hasFills = [...outputs.fills.values()].some((f) => f.color || f.colors.some(Boolean));
+        const hasFills = [...outputs.fills.values()].some(
+          (f) => f.color || f.colors.some(Boolean) || f.gradient?.topColor.some(Boolean) || f.gradient?.bottomColor.some(Boolean),
+        );
         const hasBackground = [...outputs.bgColors.values()].some((layer) => layer.some(Boolean));
         if (
           visiblePlots === 0 &&

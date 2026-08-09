@@ -8,7 +8,7 @@ import type {
   SeriesType,
   Time,
 } from 'lightweight-charts';
-import type { FillRegion, HLine, PlotSeries } from '@heyphat/piner';
+import type { FillGradient, FillRegion, HLine, PlotSeries } from '@heyphat/piner';
 import { pineColorToRgba } from './color';
 import { logicalToX } from './coords';
 
@@ -28,6 +28,28 @@ export interface ResolvedFill {
  * two `hline()`s is the standard way to shade an RSI band — so both maps are consulted, and an
  * hline becomes a constant level across every bar.
  */
+function hasGradientColor(gradient: FillGradient | undefined): boolean {
+  return gradient !== undefined && (gradient.topColor.some(Boolean) || gradient.bottomColor.some(Boolean));
+}
+
+/**
+ * The two CSS stops for one bar of a gradient, or `null` when the bar has no colour at all.
+ *
+ * Either end may be `na` — `fill(…, top_color, na)` fading a band out into the chart is the
+ * common case. A missing end becomes the OTHER end's RGB at zero alpha rather than a generic
+ * transparent: canvas interpolates gradient stops in non-premultiplied sRGB, so fading to
+ * `rgba(0,0,0,0)` would drag the midpoint through grey and leave a dirty smear.
+ */
+function gradientStops(top: string | null | undefined, bottom: string | null | undefined): [string, string] | null {
+  if (!top && !bottom) return null;
+  return [top ? pineColorToRgba(top) : fadeOut(bottom!), bottom ? pineColorToRgba(bottom) : fadeOut(top!)];
+}
+
+/** Same hue, zero alpha. */
+function fadeOut(hex: string): string {
+  return pineColorToRgba(`${hex.slice(0, 7)}00`);
+}
+
 export function resolveFills(
   fills: ReadonlyMap<number, FillRegion>,
   plots: ReadonlyMap<number, PlotSeries>,
@@ -54,8 +76,9 @@ export function resolveFills(
     const bottom = boundary(region.plot2);
     if (!top || !bottom) continue;
     // A fill with neither a static colour nor any per-bar colour is `fill(..., color = na)` —
-    // the script's way of switching it off.
-    if (!region.color && !region.colors.some(Boolean)) continue;
+    // the script's way of switching it off. A gradient fill carries its colours in `gradient`
+    // and leaves both of those empty, so it has to be checked separately or it is discarded here.
+    if (!region.color && !region.colors.some(Boolean) && !hasGradientColor(region.gradient)) continue;
     out.push({ region, top, bottom });
   }
   return out;
@@ -147,6 +170,11 @@ export class FillsPrimitive implements ISeriesPrimitive<Time> {
     series: ISeriesApi<SeriesType, Time>,
   ): void {
     const { region, top, bottom } = fill;
+    if (region.gradient) {
+      this.drawGradient(ctx, fill, region.gradient, xs, from, to, series);
+      return;
+    }
+
     let runStart = -1;
     let runColor = '';
 
@@ -192,5 +220,65 @@ export class FillsPrimitive implements ISeriesPrimitive<Time> {
       }
     }
     flush(to + 1);
+  }
+
+  /**
+   * `fill(plot1, plot2, top_value, bottom_value, top_color, bottom_color)` — a vertical
+   * gradient rather than a flat wash.
+   *
+   * The region is still bounded by the two plots, but the colour ramp is anchored to
+   * `top_value`/`bottom_value`, which are independent series and move every bar. That rules
+   * out the run-batching the flat path uses: a single linear gradient stretched over a run
+   * would stay put while the band slopes away from it. One quad per bar pair instead, each
+   * with its own ramp.
+   */
+  private drawGradient(
+    ctx: CanvasRenderingContext2D,
+    fill: ResolvedFill,
+    gradient: FillGradient,
+    xs: Float64Array,
+    from: number,
+    to: number,
+    series: ISeriesApi<SeriesType, Time>,
+  ): void {
+    const { top, bottom } = fill;
+    const y = (price: number | undefined): number | null =>
+      typeof price === 'number' && Number.isFinite(price) ? series.priceToCoordinate(price) : null;
+
+    for (let i = from; i < to; i += 1) {
+      const stops = gradientStops(gradient.topColor[i], gradient.bottomColor[i]);
+      if (!stops) continue;
+
+      const topA = y(top[i]);
+      const topB = y(top[i + 1]);
+      const botA = y(bottom[i]);
+      const botB = y(bottom[i + 1]);
+      if (topA === null || topB === null || botA === null || botB === null) continue;
+
+      const xA = xs[i - from];
+      const xB = xs[i + 1 - from];
+      if (!Number.isFinite(xA) || !Number.isFinite(xB)) continue;
+
+      ctx.beginPath();
+      ctx.moveTo(xA, topA);
+      // Half a pixel of overlap into the next quad. Adjacent translucent paths that meet
+      // exactly leave antialiased hairlines, which read as vertical banding across the fill.
+      ctx.lineTo(xB + 0.5, topB);
+      ctx.lineTo(xB + 0.5, botB);
+      ctx.lineTo(xA, botA);
+      ctx.closePath();
+
+      const rampTop = y(gradient.topValue[i]) ?? topA;
+      const rampBottom = y(gradient.bottomValue[i]) ?? botA;
+      if (Math.abs(rampTop - rampBottom) < 0.5) {
+        ctx.fillStyle = stops[0];
+      } else {
+        const ramp = ctx.createLinearGradient(0, rampTop, 0, rampBottom);
+        ramp.addColorStop(0, stops[0]);
+        ramp.addColorStop(1, stops[1]);
+        ctx.fillStyle = ramp;
+      }
+      ctx.fill();
+    }
   }
 }

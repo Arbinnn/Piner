@@ -1,659 +1,328 @@
-// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
-// Original base script by AlbaTherium & Ma Bang Chu
-// Modified, Updated and Enhanced by Crypto Smart (@cryptosmart_org)
 
+// This work is licensed under Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+// https://creativecommons.org/licenses/by-nc-sa/4.0/
+// © Zeiierman {
 //@version=6
-indicator("ALGOSMART ASSIST v2", "ALGOSMART assist v2", true, max_bars_back = 5000, max_labels_count = 500, max_lines_count = 500)
+indicator("Doji Volume Map (Zeiierman)", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500)
+//}
 
-//drawing options
-showPOI = input.bool(true, "Show POI", group="POI settings")
-poi_type = input.string ("---",title='POI type', group="POI settings", options=["---", "Mother Bar"])
-mergeRatio = input.float(defval=0, minval=0, maxval=0.5, step=0.02, title="Merge Ratio", group="POI settings" )
-maxBarHistory = input.int(2000, title="Max IPA age", group="POI settings")
+// ~~ Tooltips {
+var string t1  = "How many bars back the script scans to find qualifying candles. Higher values show more historical signals but use more chart resources."
+var string t2  = "Length of the average volume calculation used as the baseline for relative volume. Larger values smooth the benchmark more."
+var string t3  = "Minimum multiple of average volume required for a candle to qualify. Example: 1.5 means current volume must be at least 1.5x the average volume."
+var string t4  = "Maximum candle body size allowed, expressed as a percentage of the full candle range. Lower values require a more doji-like candle."
+var string t5  = "Minimum candle range required, measured as a fraction of ATR. Helps ignore very small candles that look like dojis but have little significance."
 
-structure_type = input.string ("Choch without IDM",title='Structure type', group="Structure", options=["Choch without IDM", "Choch with IDM"])
-showHL = input.bool(false, "Mark H/L", inline = "HL", group = "Structure")
-showCircleHL = input.bool(true, "Mark Circle", inline = "HL", group = "Structure")
-showMn = input.bool(false, "Show pullback", group = "Structure")
-showBOS = input.bool(true, "Show B O S", group = "Structure")
-showChoCh = input.bool(true, "Show CHoCH", group = "Structure")
-showIDM = input.bool(true,"Show IDM", group = "Structure")
-showPdhl = input.bool(false,"Show PDH/L", inline = "PDHL", group = "Structure")
-lengPdhl = input.int(40, title="", inline = "PDHL", group="Structure")
-showMid = input.bool(true, "Show Equilibrium", inline = "mid", group = "Structure")
-lengMid = input.int(40, title="", inline = "mid", group="Structure")
-showSw = input.bool(true, "Show H/L sweeping lines", inline = "sweep", group = "Structure")
-markX = input.bool(false, 'Mark "X"', inline = "sweep", group = "Structure")
-showTP = input.bool(false, 'Show Target profit',group = 'Structure')
-showliveBOS = input.bool(true,"Show live BOS", inline = "liveB", group = "Structure")
-lengBos = input.int(40, title="", inline = "liveB", group="Structure")
-showliveChoch = input.bool(true,"Show live ChoCh", inline = "liveCho", group = "Structure")
-lengChoch = input.int(40, title="", inline = "liveCho", group="Structure")
-showliveIDM = input.bool(true,"Show live IDM", inline = "liveI", group = "Structure")
-lengIDM = input.int(15, title="", inline = "liveI", group="Structure")
-showSCOB = input.bool(true, "Show SCOB", inline = "Bar", group = "Structure")
-showISB = input.bool(false, 'Show ISB', inline = "Bar", group = "Structure")
-showOSB = input.bool(false, 'Show OSB', inline = "Bar", group = "Structure")
+var string t6  = "Show or hide the bubble markers on qualifying candles."
+var string t7  = "Show or hide projected horizontal levels from qualifying bubbles."
+var string t8  = "Maximum number of projected levels or merged zones to display from the current lookback window."
+var string t9  = "Use bullish and bearish colors based on candle direction. When disabled, all bubbles and levels use the neutral color."
+var string t10 = "Color used for bullish qualifying candles when Bull/Bear Bubble Color is enabled."
+var string t11 = "Color used for bearish qualifying candles when Bull/Bear Bubble Color is enabled."
+var string t12 = "Fallback color used when Bull/Bear Bubble Color is disabled."
 
-colorHL = input.color(color.yellow, "High/Low", group = "Structure | Color")
-bull = input.color(color.green, "Bullish", group = "Structure | Color")
-bear = input.color(color.red  , "Bearish", group = "Structure | Color")
-scobUp = input.color(#0b3ff9   , "Bullish SCOB", group = "Structure | Color")
-scobDn = input.color(#da781d, "Bearish SCOB", group = "Structure | Color")
-colorISB = input.color(#bb06f7,'Inside Bar', group = "Structure | Color")
-colorOSB_up = input.color(#0b3ff9,'Bullish OSB', group = "Structure | Color")
-colorOSB_down = input.color(#da781d,'Bearish OSB', group = "Structure | Color")
-colorIDM = input.color(color.rgb(255, 255, 255, 20), "IDM", group = "Structure | Color")
-colorSweep  = input.color(color.gray, "Sweeping line", group = "Structure | Color")
-colorTP = input.color(color.purple, 'Target profit', group = 'Structure | Color')
-colorDemand = input.color(color.rgb(47, 130, 96, 80), 'Demand', group = "Structure | Color")
-colorSupply = input.color(color.rgb(205, 92, 72, 80), 'Supply', group = "Structure | Color")
-colorMitigated = input.color(color.rgb(192, 192, 192, 80), 'Mitigated', group = "Structure | Color")
+var string t13 = "When enabled, projected levels that are close together are combined into a single zone box instead of being shown as separate lines."
+var string t14 = "Maximum distance between levels, measured in ATR units, for them to be merged into the same zone."
+var string t15 = "Transparency of merged zone boxes. Higher values make the box more transparent."
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
 
-//#region variable declaration
-//Constant
-const string IDM_TEXT = "I D M"
-const string CHOCH_TEXT = "CHoCH" 
-const string BOS_TEXT = "B O S"
-const string PDH_TEXT = "PDH"
-const string PDL_TEXT = "PDL"
-const string MID_TEXT = "0.5"
+// ~~ Inputs {
+string SIGNAL_GROUP = "Signal Logic"
+string STYLE_GROUP  = "Bubble Style"
+string MERGE_GROUP  = "Level Merging"
 
-//high low
-var L = low
-var H = high
-var idmLow = low
-var idmHigh = high
-var lastH = high
-var lastL = low
-var H_lastH = high
-var L_lastHH = low
-var H_lastLL = high
-var L_lastL = low
-var motherHigh = high[1]
-var motherLow = low[1]
+lookbackInput       = input.int(200, "Lookback Length", minval = 20, maxval = 5000, group = SIGNAL_GROUP, tooltip = t1)
+volLengthInput      = input.int(20, "Volume Average Length", minval = 1, group = SIGNAL_GROUP, tooltip = t2)
+relVolMultInput     = input.float(1.3, "Relative Volume Multiplier", minval = 0.1, step = 0.1, group = SIGNAL_GROUP, tooltip = t3)
+bodyPctInput        = input.float(25.0, "Max Body % of Range", minval = 1, maxval = 100, step = 1, group = SIGNAL_GROUP, tooltip = t4)
+minRangeAtrFrac     = input.float(0.20, "Min Candle Range as ATR Fraction", minval = 0.0, step = 0.05, group = SIGNAL_GROUP, tooltip = t5)
 
-//bar indexes
-var int motherBar = time[1]
-var int idmLBar = int(na)
-var int idmHBar = int(na)
-var int HBar = time
-var int LBar = time
-var int lastHBar = time
-var int lastLBar = time
+showBubblesInput    = input.bool(true, "Show Bubbles", inline = "show", group = STYLE_GROUP, tooltip = t6)
+projectLevelsInput  = input.bool(true, "Project Levels", inline = "show", group = STYLE_GROUP, tooltip = t7)
+levelsQtyInput      = input.int(8, "Max Projected Levels", minval = 1, maxval = 100, inline = "p", group = STYLE_GROUP, tooltip = t8)
+bullBearColorInput  = input.bool(true, "Bull/Bear Bubble Color", group = STYLE_GROUP, tooltip = t9)
+BULL_COLOR          = input.color(#089981, "", inline = "color", group = STYLE_GROUP, tooltip = t10)
+BEAR_COLOR          = input.color(#f23645, "", inline = "color", group = STYLE_GROUP, tooltip = t11)
+NEUTRAL_COLOR       = input.color(#787b86, "", inline = "color", group = STYLE_GROUP, tooltip = t12)
 
-//pullback 
-var bool mnStrc = bool(na)
-var bool prevMnStrc  = bool(na)
-var float top = high
-var float bot = low
-var float top_ = high
-var float bot_ = low
-var int bar = time
-var int bar_ = time
+mergeCloseLevels    = input.bool(true, "Merge Close Levels Into Box", group = MERGE_GROUP, tooltip = t13)
+mergeDistanceAtr    = input.float(0.25, "Merge Distance (ATR)", minval = 0.01, step = 0.01, group = MERGE_GROUP, tooltip = t14)
+boxTransparency     = input.int(85, "Box Transparency", minval = 0, maxval = 100, group = MERGE_GROUP, tooltip = t15)
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
 
-//structure 
-var bool isPrevBos = bool(na)
-var bool findIDM = false
-var bool isBosUp = false
-var bool isBosDn = false
-var bool isCocUp = true
-var bool isCocDn = true
+// ~~ Storage {
+var label[] bubbleLabels   = array.new<label>()
+var line[] projectedLines  = array.new<line>()
+var label[] levelLabels    = array.new<label>()
+var box[] mergedLevelBoxes = array.new<box>()
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
 
-//poi
-var bool isSweepOBS = false
-var int current_OBS = int(na)
-var float high_MOBS = float(na)
-var float low_MOBS = float(na)
+// ~~ Series calculations {
+bodySize    = math.abs(close - open)
+candleRange = high - low
+bodyPct     = candleRange > 0 ? (bodySize / candleRange) * 100.0 : 100.0
 
-var bool isSweepOBD = false
-var int current_OBD = int(na)
-var float low_MOBD = float(na)
-var float high_MOBD = float(na)
+volAvg      = ta.sma(volume, volLengthInput)
+volStd      = ta.stdev(volume, volLengthInput)
+volZ        = volStd != 0 ? (volume - volAvg) / volStd : 0.0
 
-//Array
-var puHigh = array.new_float(0) 
-var puHBar = array.new_int(0) 
-var puLow = array.new_float(0) 
-var puLBar = array.new_int(0) 
-var demandZone = array.new_box(0)
-var supplyZone = array.new_box(0)
-var arrLastH = array.new_float(0) 
-var arrLastHBar = array.new_int(0) 
-var arrLastL = array.new_float(0) 
-var arrLastLBar = array.new_int(0) 
-var arrIdmLine = array.new_line(0)
-var arrIdmLabel = array.new_label(0)
-var arrBCLine = array.new_line(0)
-var arrBCLabel = array.new_label(0)
-var arrHLLabel = array.new_label(0)
-var arrHLCircle = array.new_label(0)
+atrVal      = ta.atr(14)
+minRangeOk  = candleRange >= atrVal * minRangeAtrFrac
 
-//color
-color transp = color.new(color.gray,100)
+relHighVol  = volume > volAvg * relVolMultInput
+volRising   = volume > volume[1]
+looseDoji   = candleRange > 0 and bodyPct <= bodyPctInput and minRangeOk
 
-//Caculate
-curTf = timeframe.in_seconds(timeframe.period)
-dayTf = timeframe.in_seconds("D")
-i_loop = 2*dayTf/curTf
-[pdh, pdl]  = request.security(syminfo.tickerid, 'D', [high[1], low[1]])
-len = curTf*1000
+signal      = relHighVol and volRising and looseDoji
+signalPrice = hl2
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
 
-//#endregion
+// ~~ Buffer assignment {
+srcSignal = signal
+srcPrice  = signalPrice
+srcZ      = volZ
+srcCl     = close
+srcOp     = open
+srcVol    = volume
+srcHi     = high
+srcLo     = low
 
-//#region Inside Bar
-isb = motherHigh > high and motherLow < low
-if isb
-    motherHigh := motherHigh
-    motherLow := motherLow
-    motherBar := motherBar
-else
-    motherHigh := high
-    motherLow := low
-    motherBar := time
+max_bars_back(srcSignal, 5000)
+max_bars_back(srcPrice, 5000)
+max_bars_back(srcZ, 5000)
+max_bars_back(srcCl, 5000)
+max_bars_back(srcOp, 5000)
+max_bars_back(srcVol, 5000)
+max_bars_back(srcHi, 5000)
+max_bars_back(srcLo, 5000)
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
 
-//#endregion
+// ~~ Helpers {
+get_bubble_size(float z) =>
+    string sz = size.tiny
+    if z > 5.0
+        sz := size.huge
+    else if z > 3.5
+        sz := size.large
+    else if z > 2.5
+        sz := size.normal
+    else if z > 1.8
+        sz := size.small
+    sz
 
-//#region drawing function
-isGreenBar(int bar) => close[bar] > open[bar]
-
-textCenter(int left, int right) => int(math.avg(left,right))
-
-getStyleLabel(bool style) => style ? label.style_label_down : label.style_label_up
-
-getStyleArrow(bool style) => style ? label.style_arrowdown : label.style_arrowup
-
-getYloc(bool style) =>  style ? yloc.abovebar : yloc.belowbar
-
-getDirection(bool trend, int HBar, int LBar, float H, float L) =>
-    x = trend ? HBar : LBar
-    y = trend ? H : L
-    [x, y]
-
-getPdhlBar(float value) =>
-    int x = int(na)
-    if value == pdh
-        for i = i_loop to 1 by 1
-            if (high[i] == pdh)
-                x := time[i]
-                break
+get_tier_text(float z) =>
+    if z > 5.0
+        "Low"
+    else if z > 3.0
+        "Medium"
     else
-        for i = i_loop to 1 by 1
-            if (low[i] == pdl)
-                x := time[i]
-                break
-    x
+        "High"
 
-updateLastH() =>
-    array.push(arrLastH,lastH)
-    array.push(arrLastHBar,lastHBar)
-
-updateLastL() =>
-    array.push(arrLastL,lastL)
-    array.push(arrLastLBar,lastLBar)
-
-getNLastValue(arr, n) =>
-    if array.size(arr) > n - 1
-        array.get(arr, array.size(arr) - n) 
-
-removeNLastLabel(arr, n) =>
-    if array.size(arr) > n - 1
-        label.delete(array.get(arr, array.size(arr) - n))
-
-removeNLastLine(arr, n) =>
-    if array.size(arr) > n - 1
-        line.delete(array.get(arr, array.size(arr) - n))    
-
-removeLastLabel(arr, n) =>
-    if array.size(arr) > n - 1
-        for i = 1 to n
-            label.delete(array.get(arr, array.size(arr) - i))
-
-removeLastLine(arr, n) =>
-    if array.size(arr) > n - 1
-        for i = 1 to n
-            line.delete(array.get(arr, array.size(arr) - i))
-
-removeIdm() =>
-    removeLastLabel(arrIdmLabel, 1)
-    removeLastLine(arrIdmLine, 1)
-
-fixStrcAfterBos() =>
-    removeLastLabel(arrBCLabel, 1)
-    removeLastLine(arrBCLine, 1)
-    removeIdm()
-    removeLastLabel(arrHLLabel, 2)
-    removeLastLabel(arrHLCircle, 2)
-
-fixStrcAfterChoch() =>
-    removeLastLabel(arrBCLabel, 2)
-    removeLastLine(arrBCLine, 2)
-    removeNLastLabel(arrHLLabel, 2)
-    removeNLastLabel(arrHLLabel, 3)
-    removeNLastLabel(arrHLCircle, 2)
-    removeNLastLabel(arrHLCircle, 3)
-    removeNLastLabel(arrIdmLabel, 2)
-    removeNLastLine(arrIdmLine, 2)
-
-drawIDM(bool trend) =>
-    [x, y] = getDirection(trend, idmLBar, idmHBar, idmLow, idmHigh)
-    colorText = trend and H_lastH > L_lastHH or not trend and H_lastLL > L_lastL ? color.red : colorIDM
-    if showIDM
-        ln = line.new(x, y, time, y, xloc.bar_time, color = colorIDM, style = line.style_dotted)
-        lbl = label.new(textCenter(time, x), y, IDM_TEXT, xloc.bar_time, color = transp, textcolor = colorText, style = getStyleLabel(not trend), size = size.small)
-        array.push(arrIdmLine,ln)
-        array.push(arrIdmLabel,lbl)
-    array.clear(trend ? puLow : puHigh)    
-    array.clear(trend ? puLBar : puHBar) 
-
-drawStructure(txt, trend) =>
-    [x, y] = getDirection(trend, lastHBar, lastLBar, lastH, lastL)
-    color = trend ? bull : bear
-    if txt == BOS_TEXT and showBOS
-        ln = line.new(x, y, time, y, xloc.bar_time, color = color, style = line.style_dashed)
-        lbl = label.new(textCenter(time, x), y, txt, xloc.bar_time, color = transp, style = getStyleLabel(trend), textcolor = color, size = size.small)
-        array.push(arrBCLine,ln)
-        array.push(arrBCLabel,lbl)
-    if txt == CHOCH_TEXT and showChoCh
-        ln = line.new(x, y, time, y, xloc.bar_time, color = color, style = line.style_dashed)
-        lbl = label.new(textCenter(time, x), y, txt, xloc.bar_time, color = transp, style = getStyleLabel(trend), textcolor = color, size = size.small)
-        array.push(arrBCLine,ln)
-        array.push(arrBCLabel,lbl)
-
-drawLiveStrc(bool condition, bool trend, color color1, color color2, string txt, int length) =>
-    line ln = line(na)
-    label lbl = label(na)
-    x2 = time + (time - time[1]) * length
-    colorText = trend ? color1 : color2
-    if barstate.islast and condition
-        [x, y] = switch
-            txt == BOS_TEXT => [trend ? lastHBar : lastLBar, trend ? lastH : lastL]
-            txt == CHOCH_TEXT => [trend ? lastHBar : lastLBar, trend ? lastH : lastL]
-            txt == IDM_TEXT => [trend ? idmLBar : idmHBar, trend ? idmLow : idmHigh]
-            txt == MID_TEXT => [math.min(lastHBar, lastLBar), math.avg(lastH, lastL)]
-            txt == PDH_TEXT => [getPdhlBar(pdh), pdh]
-            txt == PDL_TEXT => [getPdhlBar(pdl), pdl]
-        _txt = txt + " - " + str.tostring(y)
-        ln := line.new(x, y, x2, y, xloc.bar_time, color = colorIDM, style = line.style_dotted)
-        lbl := label.new(x2, y, _txt, xloc.bar_time, color = transp, textcolor = colorText, style = label.style_label_left, size = size.small)
-    line.delete(ln[1])
-    label.delete(lbl[1])
-
-drawPullback(int x, float y, bool trend) =>
-    color = trend ? bear : bull
-    if showMn 
-        label.new(x, y, "", xloc.bar_time, getYloc(trend), color, getStyleArrow(trend), size = size.tiny )
-
-drawHL(bool trend, string txt) =>
-    [x, y] = getDirection(trend, HBar, LBar, H, L)
-    if showHL
-        lbl = label.new(x, y, txt, xloc.bar_time, color = transp, textcolor = colorHL, style = getStyleLabel(trend))
-        array.push(arrHLLabel, lbl)
-    if showCircleHL
-        colorCircle = trend ? color.new(bull, 55) : color.new(bear, 55)
-        lbl2 = label.new(x, y, '', xloc.bar_time, getYloc(trend), color = colorCircle, style = label.style_circle, size = size.tiny)     
-        array.push(arrHLCircle, lbl2)
-
-drawSweep(bool trend) =>
-    [x, y] = getDirection(trend, lastHBar, lastLBar, lastH, lastL)
-    if showSw
-        line.new(x, y, time, y, xloc.bar_time, color = colorSweep, style = line.style_dotted)
-        if markX
-            label.new(textCenter(time, x), y, "X", xloc.bar_time, color = transp, textcolor = colorSweep, style = getStyleLabel(trend), size = size.small)
-
-drawTP(H, L) =>
-    target = isCocUp ? high + math.abs(H - L) : low - math.abs(H - L)
-    target := target < 0 ? 0 : target
-    if showTP
-        line.new(bar_index, isCocUp ? high : low, bar_index, target, color = colorTP, style = line.style_arrow_right)  
-
-createBox(left, right, top, bottom, color) => 
-    box.new(left=left, right=right, top=top, bottom=bottom, xloc = xloc.bar_time, bgcolor=color, border_color=color, extend = extend.right)
-
-removeZone(zoneArray, box zone) =>
-    index = array.indexof(zoneArray, zone)
-    box.delete(zone)
-    array.remove(zoneArray, index)
-
-marginZone(zone) => [box.get_top(zone), box.get_bottom(zone), box.get_left(zone)]
-
-handleZone(zoneArray, left, top, bot, color) =>
-    _top = top
-    _bot = bot
-    _left = left    
-
-    zone = getNLastValue(zoneArray, 1)
-
-    [topZone, botZone, leftZone] = marginZone(zone)
-    rangeTop = math.abs(_top-topZone)/(topZone-botZone) < mergeRatio
-    rangeBot = math.abs(_bot-botZone)/(topZone-botZone) < mergeRatio
-
-    //Merge zone
-    if _top >= topZone and _bot <= botZone or rangeTop or rangeBot
-        _top := math.max(_top,topZone)
-        _bot := math.min(_bot,botZone)
-        _left := leftZone 
-        removeZone(zoneArray, zone)     
-
-    if not (_top <= topZone and _bot >= botZone)
-        array.push(zoneArray, createBox(_left, time, _top, _bot, color))
-
-processZones(zones, isSupply) =>
-    if array.size(zones) > 0
-        for i = array.size(zones) - 1 to 0 by 1
-            zone = array.get(zones, i)
-            [topZone, botZone, leftZone] = marginZone(zone)
-            
-            //Breaker block zones
-            if isSupply and low < botZone and close > topZone
-                array.push(demandZone, createBox(leftZone, time, topZone, botZone, colorDemand))
-            else if not isSupply and high > topZone and close < botZone
-                array.push(supplyZone, createBox(leftZone, time, topZone, botZone, colorSupply))
-            //Mitigated zones
-            else if (isSupply and high >= botZone and high < topZone) or (not isSupply and low <= topZone and low > botZone)
-                box.set_right(zone, time)
-                box.set_extend(zone,extend.none) 
-                box.set_bgcolor(zone, colorMitigated)
-                box.set_border_color(zone, colorMitigated) 
-
-            //Delete sweep zones    
-            if (time - leftZone > len*maxBarHistory) or (isSupply and high >= topZone) or (not isSupply and low <= botZone)
-                removeZone(zones, zone)                
-
-scob(zones, isSupply) =>
-    [topZone, botZone, leftZone] = marginZone(getNLastValue(zones, 1))
-
-    if not isb[1]
-        if not isSupply and low[1] < low[2] and low[1] < low and close > high[1] and low[1] < topZone and low[1] > botZone
-            scobUp
-        else if isSupply and high[1] > high[2] and high[1] > high and close < low[1] and high[1] < topZone and high[1] > botZone
-            scobDn
-        else
-            color(na)
+get_zone_text(float maxZ) =>
+    if maxZ > 5.0
+        "Low"
+    else if maxZ > 3.0
+        "Medium"
     else
-        color(na)
-//#endregion
+        "High"
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
 
+// ~~ Rendering {
+if barstate.islast
+    if array.size(bubbleLabels) > 0
+        for l in bubbleLabels
+            label.delete(l)
+        array.clear(bubbleLabels)
 
-//#region Outside Bar
-osb = high > top and low < bot
+    if array.size(projectedLines) > 0
+        for ln in projectedLines
+            line.delete(ln)
+        array.clear(projectedLines)
 
-//#endregion
+    if array.size(levelLabels) > 0
+        for lb in levelLabels
+            label.delete(lb)
+        array.clear(levelLabels)
 
-//#region Pullback
-if high >= top and low <= bot //notrend
-    if mnStrc != bool(na)
-        prevMnStrc := mnStrc ? true : false
+    if array.size(mergedLevelBoxes) > 0
+        for bx in mergedLevelBoxes
+            box.delete(bx)
+        array.clear(mergedLevelBoxes)
 
-    if prevMnStrc
-        top_ := top
-        bar_ := bar
-    else
-        bot_ := bot
-        bar_ := bar
+    if showBubblesInput
+        int labelX = bar_index + 35 + 0
+        float mergeThreshold = atrVal * mergeDistanceAtr
 
-    top := high
-    bot := low
-    bar := time
-    mnStrc := bool(na)
+        float[] zoneTopArr   = array.new<float>()
+        float[] zoneBotArr   = array.new<float>()
+        float[] zoneMidArr   = array.new<float>()
+        float[] zoneMaxZArr  = array.new<float>()
+        float[] zoneDirArr   = array.new<float>()
+        int[]   zoneCountArr = array.new<int>()
+        int[]   zoneStartArr = array.new<int>()
 
-if high >= top and low > bot //uptrend
-    if prevMnStrc and mnStrc == bool(na)
-        array.push(puHBar, bar_)
-        array.push(puHigh, top_)
-        array.push(puLBar, bar)
-        array.push(puLow, bot)
-        drawPullback(bar_, top_, true)
-        drawPullback(bar, bot, false)
-    else if (not prevMnStrc and mnStrc == bool(na)) or not mnStrc
-        array.push(puLBar, bar)
-        array.push(puLow, bot)
-        drawPullback(bar, bot, false)
+        int levelsCount = 0
 
-    top := high
-    bot := low
-    bar := time
-    prevMnStrc := bool(na)
-    mnStrc := true
+        for i = 0 to lookbackInput - 1
+            if srcSignal[i]
+                color bubbleColor = bullBearColorInput
+                     ? (srcCl[i] >= srcOp[i] ? color.new(BULL_COLOR, 35) : color.new(BEAR_COLOR, 35))
+                     : color.new(NEUTRAL_COLOR, 35)
 
-if high < top and low <= bot //downtrend
-    if not prevMnStrc and mnStrc == bool(na)
-        array.push(puHBar, bar)
-        array.push(puHigh, top)
-        array.push(puLBar, bar_)
-        array.push(puLow, bot_)
-        drawPullback(bar, top, true)
-        drawPullback(bar_, bot_, false)
-    else if (prevMnStrc and mnStrc == bool(na)) or mnStrc
-        array.push(puHBar, bar)
-        array.push(puHigh, top)
-        drawPullback(bar, top, true)
+                string bubbleSize = get_bubble_size(srcZ[i])
 
-    top := high
-    bot := low
-    bar := time
-    prevMnStrc := bool(na)
-    mnStrc := false
+                label bubble = label.new(
+                     x = bar_index - i,
+                     y = srcPrice[i],
+                     text = "",
+                     style = label.style_circle,
+                     color = bubbleColor,
+                     size = bubbleSize,
+                     tooltip =
+                         "Relative High Volume + Rising Volume + Loose Doji" +
+                         "\nZ-Score: " + str.tostring(srcZ[i], "#.##") +
+                         "\nVolume: " + str.tostring(srcVol[i], format.volume) +
+                         "\nBody %: " + str.tostring(
+                             (srcHi[i] - srcLo[i]) > 0 ? (math.abs(srcCl[i] - srcOp[i]) / (srcHi[i] - srcLo[i])) * 100.0 : 0.0,
+                             "#.##"
+                         )
+                )
+                array.push(bubbleLabels, bubble)
 
-//#region update IDM
-if high >= H
-    H := high
-    HBar := time
-    L_lastHH := low  
-    idmLow := getNLastValue(puLow, 1)
-    idmLBar := getNLastValue(puLBar, 1)
+                if projectLevelsInput and levelsCount < levelsQtyInput
+                    if mergeCloseLevels
+                        bool merged = false
+                        int zoneSize = array.size(zoneMidArr)
 
-if low <= L
-    L := low
-    LBar := time
-    H_lastLL := high
-    idmHigh := getNLastValue(puHigh, 1)
-    idmHBar := getNLastValue(puHBar, 1)
+                        if zoneSize > 0
+                            for z = 0 to zoneSize - 1
+                                float zoneMid = array.get(zoneMidArr, z)
+                                if math.abs(srcPrice[i] - zoneMid) <= mergeThreshold
+                                    float oldTop   = array.get(zoneTopArr, z)
+                                    float oldBot   = array.get(zoneBotArr, z)
+                                    float oldMaxZ  = array.get(zoneMaxZArr, z)
+                                    float oldDir   = array.get(zoneDirArr, z)
+                                    int oldCount   = array.get(zoneCountArr, z)
+                                    int oldStart   = array.get(zoneStartArr, z)
 
-//#endregion
+                                    float newTop   = math.max(oldTop, srcPrice[i])
+                                    float newBot   = math.min(oldBot, srcPrice[i])
+                                    float newMid   = (newTop + newBot) / 2.0
+                                    float newMaxZ  = math.max(oldMaxZ, srcZ[i])
+                                    float thisDir  = srcCl[i] >= srcOp[i] ? 1.0 : -1.0
+                                    float newDir   = oldDir + thisDir
+                                    int newCount   = oldCount + 1
+                                    int newStart   = math.min(oldStart, bar_index - i)
 
-// #region structure mapping
-// Check for IDM
-if findIDM and isCocUp and isCocUp
-    if low < idmLow
-        findIDM := false
-        isBosUp := false
-        L := low
-        LBar := time 
-        if structure_type == "Choch with IDM" and idmLow == lastL
-            if isPrevBos
-                fixStrcAfterBos() 
-                lastL := getNLastValue(arrLastL, 1)    
-                lastLBar := getNLastValue(arrLastLBar, 1)    
-                lastH := H
-                lastHBar := HBar
-                drawIDM(true)
-                drawHL(true, 'HH')
-                updateLastH()
-                updateLastL()
-                H_lastH := getNLastValue(arrLastH, 1)
-            else
-                fixStrcAfterChoch()
-                isCocUp := false
-                isCocDn := true
-        else
-            lastH := H
-            lastHBar := HBar
-            drawIDM(true)
-            drawHL(true, 'HH')
-            updateLastH()
-            updateLastL()
-            H_lastH := getNLastValue(arrLastH, 1)
+                                    array.set(zoneTopArr, z, newTop)
+                                    array.set(zoneBotArr, z, newBot)
+                                    array.set(zoneMidArr, z, newMid)
+                                    array.set(zoneMaxZArr, z, newMaxZ)
+                                    array.set(zoneDirArr, z, newDir)
+                                    array.set(zoneCountArr, z, newCount)
+                                    array.set(zoneStartArr, z, newStart)
 
+                                    merged := true
+                                    break
 
-if findIDM and isCocDn and isBosDn
-    if high > idmHigh
-        findIDM := false
-        isBosDn := false
-        H := high
-        HBar := time
-        if structure_type == "Choch with IDM" and idmHigh == lastH
-            if isPrevBos
-                fixStrcAfterBos()
-                lastH := getNLastValue(arrLastH, 1)    
-                lastHBar := getNLastValue(arrLastHBar, 1)   
-                lastL := L
-                lastLBar := LBar
-                drawIDM(false) 
-                drawHL(false, 'LL')
-                updateLastH()
-                updateLastL()
-                L_lastL := getNLastValue(arrLastL, 1)
-            else
-                fixStrcAfterChoch()  
-                isCocUp := true
-                isCocDn := false  
-        else
-            lastL := L
-            lastLBar := LBar
-            drawIDM(false) 
-            drawHL(false, 'LL')
-            updateLastH()
-            updateLastL()
-            L_lastL := getNLastValue(arrLastL, 1)
+                        if not merged
+                            array.push(zoneTopArr, srcPrice[i])
+                            array.push(zoneBotArr, srcPrice[i])
+                            array.push(zoneMidArr, srcPrice[i])
+                            array.push(zoneMaxZArr, srcZ[i])
+                            array.push(zoneDirArr, srcCl[i] >= srcOp[i] ? 1.0 : -1.0)
+                            array.push(zoneCountArr, 1)
+                            array.push(zoneStartArr, bar_index - i)
 
+                        levelsCount += 1
+                    else
+                        line lvl = line.new(
+                             x1 = bar_index - i,
+                             y1 = srcPrice[i],
+                             x2 = labelX,
+                             y2 = srcPrice[i],
+                             color = bubbleColor,
+                             style = line.style_dashed,
+                             width = 1,
+                             extend = extend.none
+                        )
+                        array.push(projectedLines, lvl)
 
-//Check for ChoCh
-if isCocDn and high > lastH
-    if structure_type == "Choch without IDM" and idmHigh == lastH and close > idmHigh
-        removeIdm()
-    if close > lastH 
-        drawStructure(CHOCH_TEXT, true) //Confirm CocUp 
-        findIDM := true
-        isBosUp := true
-        isCocUp := true
-        isBosDn := false
-        isCocDn := false
-        isPrevBos := false
-        L_lastL := getNLastValue(arrLastL, 1) 
-        drawTP(lastH,lastL)
-    else
-        drawSweep(true)
-      
-if isCocUp and low < lastL
-    if structure_type == "Choch without IDM" and idmLow == lastL and close < idmLow
-        removeIdm()
-    if close < lastL
-        drawStructure(CHOCH_TEXT, false)  //Confirm CocDn
-        findIDM := true
-        isBosUp := false
-        isCocUp := false
-        isBosDn := true
-        isCocDn := true
-        isPrevBos := false
-        H_lastH := getNLastValue(arrLastH, 1)
-        drawTP(lastH,lastL)
-    else
-        drawSweep(false)
+                        label tier = label.new(
+                             x = labelX,
+                             y = srcPrice[i],
+                             text = get_tier_text(srcZ[i]),
+                             style = label.style_label_left,
+                             textcolor = bubbleColor,
+                             color = color.new(chart.bg_color, 100),
+                             size = size.small
+                        )
+                        array.push(levelLabels, tier)
 
-//Check for BoS
-if not findIDM and not isBosUp and isCocUp
-    if high > lastH
-        if close > lastH
-            drawStructure(BOS_TEXT, true)  //Confirm BosUp
-            findIDM := true
-            isBosUp := true
-            isCocUp := true
-            isBosDn := false
-            isCocDn := false
-            isPrevBos := true
-            drawHL(false, 'HL')
-            lastL := L
-            lastLBar := LBar
-            L_lastL := L
-            drawTP(lastH,lastL)
-        else
-            drawSweep(true)
+                        levelsCount += 1
 
-if not findIDM and not isBosDn and isCocDn 
-    if low < lastL
-        if close < lastL
-            drawStructure(BOS_TEXT, false)  //Confirm BosDn
-            findIDM := true
-            isBosUp := false
-            isCocUp := false
-            isBosDn := true
-            isCocDn := true
-            isPrevBos := true
-            drawHL(true, 'LH')
-            lastH := H
-            lastHBar := HBar
-            H_lastH := H
-            drawTP(lastH,lastL)
-        else
-            drawSweep(false)
-//#endregion
+        if projectLevelsInput and mergeCloseLevels
+            int zoneSize = array.size(zoneMidArr)
 
-//#trigger update High and Low 
+            if zoneSize > 0
+                for z = 0 to zoneSize - 1
+                    float zoneTop   = array.get(zoneTopArr, z)
+                    float zoneBot   = array.get(zoneBotArr, z)
+                    float zoneMid   = array.get(zoneMidArr, z)
+                    float zoneMaxZ  = array.get(zoneMaxZArr, z)
+                    float zoneDir   = array.get(zoneDirArr, z)
+                    int zoneCount   = array.get(zoneCountArr, z)
+                    int zoneStart   = array.get(zoneStartArr, z)
 
-if high > lastH
-    lastH := high
-    lastHBar := time
+                    color zoneBaseColor = bullBearColorInput
+                         ? (zoneDir >= 0 ? BULL_COLOR : BEAR_COLOR)
+                         : NEUTRAL_COLOR
 
-if low < lastL
-    lastL := low
-    lastLBar := time
+                    if zoneCount > 1
+                        float pad = math.max(syminfo.mintick * 2.0, mergeThreshold * 0.35)
 
-//#endregion
-if showPOI
-    if not isSweepOBS
-        high_MOBS := high[3]
-        low_MOBS := low[3]
-        current_OBS := time[3]
-        if high_MOBS > high[4] and high_MOBS > high[2]
-            isSweepOBS := true
-    else
-        if low_MOBS > high[1]
-            handleZone(supplyZone, current_OBS, high_MOBS, low_MOBS, colorSupply)
-            isSweepOBS := false
-        else 
-            if poi_type == "Mother Bar" and isb[2]
-                high_MOBS := math.max(high_MOBS,motherHigh[2])
-                low_MOBS := math.min(low_MOBS,motherLow[2])
-                current_OBS := math.min(current_OBS,motherBar)    
-            else
-                high_MOBS := high[2]
-                low_MOBS := low[2]
-                current_OBS := time[2]        
-            
-    if not isSweepOBD
-        low_MOBD := low[3]
-        high_MOBD := high[3]
-        current_OBD := time[3]
-        if low_MOBD < low[4] and low_MOBD < low[2]
-            isSweepOBD := true
-    else
-        if high_MOBD < low[1]
-            handleZone(demandZone, current_OBD, high_MOBD, low_MOBD, colorDemand)
-            isSweepOBD := false
-        else 
-            if poi_type == "Mother Bar" and isb[2]
-                high_MOBD := math.max(high_MOBD,motherHigh[2])
-                low_MOBD := math.min(low_MOBD,motherLow[2])
-                current_OBD := math.min(current_OBD,motherBar)        
-            else
-                high_MOBD := high[2]
-                low_MOBD := low[2]
-                current_OBD := time[2]    
-//#endregion
+                        box zoneBox = box.new(
+                             left = math.max(zoneStart, bar_index - lookbackInput),
+                             top = zoneTop + pad,
+                             right = labelX,
+                             bottom = zoneBot - pad,
+                             border_color = color.new(zoneBaseColor, 15),
+                             border_width = 1,
+                             bgcolor = color.new(zoneBaseColor, boxTransparency)
+                        )
+                        array.push(mergedLevelBoxes, zoneBox)
 
-//#region run function
-barcolor(showSCOB ? scob(supplyZone, true) : na, -1)
-barcolor(showSCOB ? scob(demandZone, false) : na, -1)
-barcolor(showISB and isb ? colorISB : na, 0,title="InSide Bar")
-barcolor(osb and isGreenBar(0) and showOSB ? colorOSB_up : na)
-barcolor(osb and not isGreenBar(0) and showOSB ? colorOSB_down : na) 
-processZones(supplyZone, true)
-processZones(demandZone, false)
-drawLiveStrc(showliveIDM and findIDM, isCocUp, colorIDM, colorIDM, IDM_TEXT, lengIDM)
-drawLiveStrc(showliveChoch, not isCocUp, bull, bear, CHOCH_TEXT, lengChoch)
-drawLiveStrc(showliveBOS and not findIDM, isCocUp, bull, bear, BOS_TEXT, lengBos)
-drawLiveStrc(showPdhl, true, bull, bear, PDH_TEXT, lengPdhl)
-drawLiveStrc(showPdhl, false, bull, bear, PDL_TEXT, lengPdhl)
-drawLiveStrc(showMid, true, colorIDM, colorIDM, MID_TEXT, lengMid)
-//#endregion
+                        label zoneLbl = label.new(
+                             x = labelX,
+                             y = zoneMid,
+                             text = get_zone_text(zoneMaxZ),
+                             style = label.style_label_left,
+                             textcolor = zoneBaseColor,
+                             color = color.new(chart.bg_color, 100),
+                             size = size.small
+                        )
+                        array.push(levelLabels, zoneLbl)
+                    else
+                        line lvl = line.new(
+                             x1 = zoneStart,
+                             y1 = zoneMid,
+                             x2 = labelX,
+                             y2 = zoneMid,
+                             color = color.new(zoneBaseColor, 0),
+                             style = line.style_dashed,
+                             width = 1,
+                             extend = extend.none
+                        )
+                        array.push(projectedLines, lvl)
+
+                        label tier = label.new(
+                             x = labelX,
+                             y = zoneMid,
+                             text = get_zone_text(zoneMaxZ),
+                             style = label.style_label_left,
+                             textcolor = zoneBaseColor,
+                             color = color.new(chart.bg_color, 100),
+                             size = size.small
+                        )
+                        array.push(levelLabels, tier)
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}                        
