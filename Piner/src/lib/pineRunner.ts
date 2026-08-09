@@ -5,6 +5,9 @@ import {
   LexError,
   ParseError,
   compile,
+  parse,
+  tokenize,
+  type ast,
   type Bar,
   type CompiledScript,
   type Diagnostic,
@@ -33,10 +36,49 @@ export interface RunOutcome {
   error: PineError | null;
 }
 
+/** `indicator(title, shorttitle, overlay, …)` and `strategy(…)` — overlay is the 3rd positional. */
+const OVERLAY_ARG_INDEX = 2;
+const DECLARATION_FNS = new Set(['indicator', 'strategy']);
+
+/**
+ * Recovers `overlay` when it is passed positionally.
+ *
+ * `compile()` reads only the NAMED `overlay=` argument, so `indicator("T", "S", true)` —
+ * how a lot of published scripts declare it — compiles with `overlay: false`. The renderer
+ * then puts the script on a separate pane, whose host is a whitespace-only series that never
+ * joins a price scale, and every plot and drawing silently fails to place. A script that
+ * draws hundreds of boxes and labels renders a blank chart with no error.
+ *
+ * Returns `null` when the source says nothing positionally, leaving the compiler's value
+ * (which is correct for the named form) alone.
+ */
+function positionalOverlay(source: string): boolean | null {
+  let program: ast.Program;
+  try {
+    program = parse(tokenize(source));
+  } catch {
+    return null;
+  }
+
+  for (const stmt of program.body) {
+    if (stmt.kind !== 'ExprStmt') continue;
+    const call = stmt.expr;
+    if (call.kind !== 'Call' || call.callee.kind !== 'Ident') continue;
+    if (!DECLARATION_FNS.has(call.callee.name)) continue;
+
+    const positional = call.args.filter((arg) => arg.name === undefined);
+    const overlay = positional[OVERLAY_ARG_INDEX]?.value;
+    return overlay?.kind === 'Bool' ? overlay.value : null;
+  }
+  return null;
+}
+
 /** Compiles Pine source. Never throws — all failures are normalized into `error`. */
 export function compileScript(source: string): CompileOutcome {
   try {
     const compiled = compile(source);
+    const overlay = positionalOverlay(source);
+    if (overlay !== null) compiled.metadata.overlay = overlay;
     const hasError = compiled.diagnostics.some((d) => d.severity === 'error');
     if (hasError) {
       const first = compiled.diagnostics.find((d) => d.severity === 'error')!;

@@ -1,619 +1,659 @@
-// This work is licensed under Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
-// https://creativecommons.org/licenses/by-nc-sa/4.0/
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// Original base script by AlbaTherium & Ma Bang Chu
+// Modified, Updated and Enhanced by Crypto Smart (@cryptosmart_org)
+
 //@version=6
-// © Zeiierman {
-indicator("Smart Swing VWAP (Zeiierman)", overlay = true, max_bars_back = 5000, max_labels_count = 500, max_polylines_count = 100)
-// }
+indicator("ALGOSMART ASSIST v2", "ALGOSMART assist v2", true, max_bars_back = 5000, max_labels_count = 500, max_lines_count = 500)
 
-// ~~ Tooltips {
-var string tScaleOn = "Enables this pivot scale in the multi-scale anchor ranking. Disable it to remove this scale from swing detection, agreement scoring, and anchor selection."
-var string tScaleLen = "Lookback used to detect rolling swing highs and lows for this scale. Smaller values react faster and find more local swings. Larger values identify broader market structure."
-var string tMode = "Choose what happens after price closes through the active structural swing. Recolor Entire Active Line keeps one continuous AVWAP and recolors its full active history. Preserve Old Color And Start New Segment keeps the completed color history and begins the new color from the confirmed break bar."
-var string tAPT = "Controls how quickly the adaptive AVWAP follows new price and volume. Lower values react faster. Higher values create a smoother, slower line."
-var string tAdapt = "Automatically adjusts the AVWAP tracking speed using the current ATR relative to its average. This makes the line react differently as volatility changes."
-var string tVolBias = "Controls how strongly volatility changes the adaptive tracking speed. Higher values create a larger difference between calm and volatile conditions."
-var string tQuality = "Minimum total score required before a swing can become a new AVWAP anchor. The score combines multi-scale agreement, swing size, and move strength. Higher values produce fewer anchors."
-var string tStrength = "Minimum combined confirmation required from directional movement, volatility expansion, and volume participation. Higher values accept only stronger and more decisive moves."
-var string tHold = "Minimum number of confirmed bars that must pass before another ranked swing can replace the current anchor. Higher values reduce frequent anchor changes."
-var string tRetestZone = "Maximum distance from the active AVWAP that counts as a retest touch, measured in ATR. Larger values create a wider touch zone."
-var string tRetestArm = "Price must first move this far away from the active AVWAP, measured in ATR, before a later return can trigger a retest alert."
-var string tBullLabel = "Color used for bullish swing labels such as higher lows and lower lows selected as active structural points."
-var string tBearLabel = "Color used for bearish swing labels such as higher highs and lower highs selected as active structural points."
-var string tBullLine = "Color used when the active AVWAP has bullish structural polarity."
-var string tBearLine = "Color used when the active AVWAP has bearish structural polarity."
-var string tWidth = "Width of the active and completed AVWAP lines."
-var string tShowLen = "Shows the winning pivot length inside each swing label, such as L10, L35, or L80."
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
+//drawing options
+showPOI = input.bool(true, "Show POI", group="POI settings")
+poi_type = input.string ("---",title='POI type', group="POI settings", options=["---", "Mother Bar"])
+mergeRatio = input.float(defval=0, minval=0, maxval=0.5, step=0.02, title="Merge Ratio", group="POI settings" )
+maxBarHistory = input.int(2000, title="Max IPA age", group="POI settings")
 
-// ~~ Inputs {
-u1 = input.bool(true, "Scale 1", inline = "1", group = "Pivot Scales", tooltip = tScaleOn)
-l1 = input.int(10, "Length", minval = 2, maxval = 500, inline = "1", group = "Pivot Scales", tooltip = tScaleLen)
-u2 = input.bool(true, "Scale 2", inline = "2", group = "Pivot Scales", tooltip = tScaleOn)
-l2 = input.int(20, "Length", minval = 2, maxval = 500, inline = "2", group = "Pivot Scales", tooltip = tScaleLen)
-u3 = input.bool(true, "Scale 3", inline = "3", group = "Pivot Scales", tooltip = tScaleOn)
-l3 = input.int(35, "Length", minval = 2, maxval = 500, inline = "3", group = "Pivot Scales", tooltip = tScaleLen)
-u4 = input.bool(true, "Scale 4", inline = "4", group = "Pivot Scales", tooltip = tScaleOn)
-l4 = input.int(50, "Length", minval = 2, maxval = 500, inline = "4", group = "Pivot Scales", tooltip = tScaleLen)
-u5 = input.bool(true, "Scale 5", inline = "5", group = "Pivot Scales", tooltip = tScaleOn)
-l5 = input.int(80, "Length", minval = 2, maxval = 500, inline = "5", group = "Pivot Scales", tooltip = tScaleLen)
+structure_type = input.string ("Choch without IDM",title='Structure type', group="Structure", options=["Choch without IDM", "Choch with IDM"])
+showHL = input.bool(false, "Mark H/L", inline = "HL", group = "Structure")
+showCircleHL = input.bool(true, "Mark Circle", inline = "HL", group = "Structure")
+showMn = input.bool(false, "Show pullback", group = "Structure")
+showBOS = input.bool(true, "Show B O S", group = "Structure")
+showChoCh = input.bool(true, "Show CHoCH", group = "Structure")
+showIDM = input.bool(true,"Show IDM", group = "Structure")
+showPdhl = input.bool(false,"Show PDH/L", inline = "PDHL", group = "Structure")
+lengPdhl = input.int(40, title="", inline = "PDHL", group="Structure")
+showMid = input.bool(true, "Show Equilibrium", inline = "mid", group = "Structure")
+lengMid = input.int(40, title="", inline = "mid", group="Structure")
+showSw = input.bool(true, "Show H/L sweeping lines", inline = "sweep", group = "Structure")
+markX = input.bool(false, 'Mark "X"', inline = "sweep", group = "Structure")
+showTP = input.bool(false, 'Show Target profit',group = 'Structure')
+showliveBOS = input.bool(true,"Show live BOS", inline = "liveB", group = "Structure")
+lengBos = input.int(40, title="", inline = "liveB", group="Structure")
+showliveChoch = input.bool(true,"Show live ChoCh", inline = "liveCho", group = "Structure")
+lengChoch = input.int(40, title="", inline = "liveCho", group="Structure")
+showliveIDM = input.bool(true,"Show live IDM", inline = "liveI", group = "Structure")
+lengIDM = input.int(15, title="", inline = "liveI", group="Structure")
+showSCOB = input.bool(true, "Show SCOB", inline = "Bar", group = "Structure")
+showISB = input.bool(false, 'Show ISB', inline = "Bar", group = "Structure")
+showOSB = input.bool(false, 'Show OSB', inline = "Bar", group = "Structure")
 
-lineMode  = input.string("Recolor Entire Active Line", "After Structure Break", options = ["Recolor Entire Active Line", "Preserve Old Color And Start New Segment"], group = "Line Behavior", tooltip = tMode)
-shiftMode = lineMode == "Preserve Old Color And Start New Segment"
+colorHL = input.color(color.yellow, "High/Low", group = "Structure | Color")
+bull = input.color(color.green, "Bullish", group = "Structure | Color")
+bear = input.color(color.red  , "Bearish", group = "Structure | Color")
+scobUp = input.color(#0b3ff9   , "Bullish SCOB", group = "Structure | Color")
+scobDn = input.color(#da781d, "Bearish SCOB", group = "Structure | Color")
+colorISB = input.color(#bb06f7,'Inside Bar', group = "Structure | Color")
+colorOSB_up = input.color(#0b3ff9,'Bullish OSB', group = "Structure | Color")
+colorOSB_down = input.color(#da781d,'Bearish OSB', group = "Structure | Color")
+colorIDM = input.color(color.rgb(255, 255, 255, 20), "IDM", group = "Structure | Color")
+colorSweep  = input.color(color.gray, "Sweeping line", group = "Structure | Color")
+colorTP = input.color(color.purple, 'Target profit', group = 'Structure | Color')
+colorDemand = input.color(color.rgb(47, 130, 96, 80), 'Demand', group = "Structure | Color")
+colorSupply = input.color(color.rgb(205, 92, 72, 80), 'Supply', group = "Structure | Color")
+colorMitigated = input.color(color.rgb(192, 192, 192, 80), 'Mitigated', group = "Structure | Color")
 
-apt = input.float(20, "Price Tracking Speed", minval = 1, step = 1, group = "Adaptive VWAP", tooltip = tAPT)
-adp = input.bool(false, "Adjust Speed With Volatility", group = "Adaptive VWAP", tooltip = tAdapt)
-vb  = input.float(10, "Volatility Adjustment Strength", minval = 0.1, step = 0.1, group = "Adaptive VWAP", tooltip = tVolBias)
+//#region variable declaration
+//Constant
+const string IDM_TEXT = "I D M"
+const string CHOCH_TEXT = "CHoCH" 
+const string BOS_TEXT = "B O S"
+const string PDH_TEXT = "PDH"
+const string PDL_TEXT = "PDL"
+const string MID_TEXT = "0.5"
 
-minQ = input.float(58, "Minimum Anchor Score", minval = 0, maxval = 100, step = 1, group = "Anchor Selection", tooltip = tQuality)
-minE = input.float(0.35, "Minimum Move Strength", minval = 0, maxval = 1, step = 0.05, group = "Anchor Selection", tooltip = tStrength)
-hold = input.int(8, "Bars Between New Anchors", minval = 0, maxval = 100, group = "Anchor Selection", tooltip = tHold)
+//high low
+var L = low
+var H = high
+var idmLow = low
+var idmHigh = high
+var lastH = high
+var lastL = low
+var H_lastH = high
+var L_lastHH = low
+var H_lastLL = high
+var L_lastL = low
+var motherHigh = high[1]
+var motherLow = low[1]
 
-rtZ = input.float(0.15, "Retest Touch Zone (ATR)", minval = 0.01, maxval = 1, step = 0.01, group = "Alerts", tooltip = tRetestZone)
-rtA = input.float(0.75, "Retest Setup Distance (ATR)", minval = 0.10, maxval = 5, step = 0.05, group = "Alerts", tooltip = tRetestArm)
+//bar indexes
+var int motherBar = time[1]
+var int idmLBar = int(na)
+var int idmHBar = int(na)
+var int HBar = time
+var int LBar = time
+var int lastHBar = time
+var int lastLBar = time
 
-upL = input.color(color.lime, "Bullish Label Color", group = "Style", tooltip = tBullLabel)
-dnL = input.color(color.red, "Bearish Label Color", group = "Style", tooltip = tBearLabel)
-upC = input.color(color.lime, "Bullish VWAP Color", group = "Style", tooltip = tBullLine)
-dnC = input.color(color.red, "Bearish VWAP Color", group = "Style", tooltip = tBearLine)
-wid = input.int(2, "VWAP Line Width", minval = 1, maxval = 6, group = "Style", tooltip = tWidth)
-showLen = input.bool(true, "Show Winning Pivot Length", group = "Style", tooltip = tShowLen)
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
+//pullback 
+var bool mnStrc = bool(na)
+var bool prevMnStrc  = bool(na)
+var float top = high
+var float bot = low
+var float top_ = high
+var float bot_ = low
+var int bar = time
+var int bar_ = time
 
-// ~~ Constants {
-const int N = 5
-const int ID = 0
-const int LN = 1
-const int DR = 2
-const int BX = 3
-const int PY = 4
-const int RG = 5
-const int TD = 6
-const int VX = 7
-const int VP = 8
-const int EN = 9
-const int CS = 10
-const int SC = 11
-const int OK = 12
-const int NC = 13
+//structure 
+var bool isPrevBos = bool(na)
+var bool findIDM = false
+var bool isBosUp = false
+var bool isBosDn = false
+var bool isCocUp = true
+var bool isCocDn = true
 
-const float MAR = 4.0
-const float PAD = 0.50
-const int BAD   = 3
-const float SAT = 0.20
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
+//poi
+var bool isSweepOBS = false
+var int current_OBS = int(na)
+var float high_MOBS = float(na)
+var float low_MOBS = float(na)
 
-// ~~ Market Data {
-b    = bar_index
-v    = na(volume) or volume <= 0 ? 1.0 : volume
-br   = math.max(nz(ta.tr(true), high - low), syminfo.mintick)
-tr   = math.max(nz(ta.atr(50), syminfo.mintick), syminfo.mintick)
-avg  = math.max(nz(ta.rma(tr, 50), tr), syminfo.mintick)
-va   = math.max(nz(ta.rma(v, 50), v), 1.0)
-ba   = math.max(nz(ta.rma(br, 50), br), syminfo.mintick)
-rat  = avg > 0 ? tr / avg : 1.0
-raw  = adp ? apt / math.pow(rat, vb) : apt
-aptS = float(math.round(math.max(5, math.min(300, raw))))
-cv = ta.cum(v)
-ce = ta.cum(va)
-cr = ta.cum(br)
-cx = ta.cum(ba)
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
+var bool isSweepOBD = false
+var int current_OBD = int(na)
+var float low_MOBD = float(na)
+var float high_MOBD = float(na)
 
-// ~~ Helper Functions {
-alpha(float n) => 1.0 - math.exp(-math.log(2.0) / math.max(1.0, n))
-clip(float x)  => math.max(0.0, math.min(1.0, x))
+//Array
+var puHigh = array.new_float(0) 
+var puHBar = array.new_int(0) 
+var puLow = array.new_float(0) 
+var puLBar = array.new_int(0) 
+var demandZone = array.new_box(0)
+var supplyZone = array.new_box(0)
+var arrLastH = array.new_float(0) 
+var arrLastHBar = array.new_int(0) 
+var arrLastL = array.new_float(0) 
+var arrLastLBar = array.new_int(0) 
+var arrIdmLine = array.new_line(0)
+var arrIdmLabel = array.new_label(0)
+var arrBCLine = array.new_line(0)
+var arrBCLabel = array.new_label(0)
+var arrHLLabel = array.new_label(0)
+var arrHLCircle = array.new_label(0)
 
-volAt(int i) =>
-    float q = volume[i]
-    na(q) or q <= 0 ? 1.0 : q
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
+//color
+color transp = color.new(color.gray,100)
 
-// ~~ Swing System {
-type Sw
-    float hi
-    float lo
-    int hx
-    int lx
-    int d
+//Caculate
+curTf = timeframe.in_seconds(timeframe.period)
+dayTf = timeframe.in_seconds("D")
+i_loop = 2*dayTf/curTf
+[pdh, pdl]  = request.security(syminfo.tickerid, 'D', [high[1], low[1]])
+len = curTf*1000
 
-turn(Sw s, int hb, int lb) =>
-    if na(s.hi) or hb == 0
-        s.hi := high
-        s.hx := b
+//#endregion
 
-    if na(s.lo) or lb == 0
-        s.lo := low
-        s.lx := b
+//#region Inside Bar
+isb = motherHigh > high and motherLow < low
+if isb
+    motherHigh := motherHigh
+    motherLow := motherLow
+    motherBar := motherBar
+else
+    motherHigh := high
+    motherLow := low
+    motherBar := time
 
-    int nd = s.hx > s.lx ? 1 : -1
-    bool chg = s.d != 0 and nd != s.d
-    s.d := nd
-    chg
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
+//#endregion
 
-// ~~ Matrix Functions {
-put(matrix<float> m, int r, bool on, int id, int n, Sw s) =>
-    int x = s.d > 0 ? s.lx : s.hx
-    float y = s.d > 0 ? s.lo : s.hi
-    int bb  = b - x
-    bool ok = on and s.d != 0 and not na(y) and bb >= 0 and bb < 4999
+//#region drawing function
+isGreenBar(int bar) => close[bar] > open[bar]
 
-    m.set(r, ID, float(id))
-    m.set(r, LN, float(n))
-    m.set(r, DR, float(s.d))
-    m.set(r, BX, float(x))
-    m.set(r, PY, y)
-    m.set(r, OK, ok ? 1.0 : 0.0)
+textCenter(int left, int right) => int(math.avg(left,right))
 
-    if ok
-        float sv = cv - nz(cv[bb], cv) + v[bb]
-        float ev = ce - nz(ce[bb], ce) + va[bb]
-        float sr = cr - nz(cr[bb], cr) + br[bb]
-        float er = cx - nz(cx[bb], cx) + ba[bb]
-        float dm = math.max(s.d * (close - y), 0.0)
-        float ef = dm / math.max(sr, syminfo.mintick)
-        float ds = dm / math.max(tr[bb] * 3.0, syminfo.mintick)
-        float td = math.sqrt(clip(ef / 0.35) * clip(ds))
-        float vx = clip((sr / math.max(er, syminfo.mintick) - 0.70) / 0.90)
-        float vp = clip((sv / math.max(ev, 1.0) - 0.75) / 0.75)
-        float wk = math.min(td, math.min(vx, vp))
-        float gm = math.pow(math.max(td * vx * vp, 0.0), 1.0 / 3.0)
-        float en = gm * (0.50 + 0.50 * wk)
-        float rg = clip(math.abs(s.hi - s.lo) / tr / 4.0)
+getStyleLabel(bool style) => style ? label.style_label_down : label.style_label_up
 
-        m.set(r, RG, rg)
-        m.set(r, TD, td)
-        m.set(r, VX, vx)
-        m.set(r, VP, vp)
-        m.set(r, EN, en)
-        m.set(r, CS, 0.0)
-        m.set(r, SC, 0.0)
-    else
-        for c = RG to SC
-            m.set(r, c, c == SC ? -1.0 : 0.0)
+getStyleArrow(bool style) => style ? label.style_arrowdown : label.style_arrowup
 
-link(matrix<float> m, matrix<float> g) =>
-    for i = 0 to N - 1
-        for j = 0 to N - 1
-            bool vi  = m.get(i, OK) > 0.5
-            bool vj  = m.get(j, OK) > 0.5
-            float di = m.get(i, DR)
-            float dj = m.get(j, DR)
-            float yi = m.get(i, PY)
-            float yj = m.get(j, PY)
-            float xi = m.get(i, BX)
-            float xj = m.get(j, BX)
-            float ps = math.exp(-math.abs(yi - yj) / math.max(PAD * tr, syminfo.mintick))
-            float bs = math.exp(-math.abs(xi - xj) / float(BAD))
-            float z  = vi and vj and di == dj ? math.max(ps, bs) : 0.0
-            g.set(i, j, z)
+getYloc(bool style) =>  style ? yloc.abovebar : yloc.belowbar
 
-score(matrix<float> m, matrix<float> g) =>
-    int cnt = 0
+getDirection(bool trend, int HBar, int LBar, float H, float L) =>
+    x = trend ? HBar : LBar
+    y = trend ? H : L
+    [x, y]
 
-    for i = 0 to N - 1
-        if m.get(i, OK) > 0.5
-            cnt += 1
-
-    for i = 0 to N - 1
-        if m.get(i, OK) > 0.5
-            float sm = 0.0
-
-            for j = 0 to N - 1
-                sm += g.get(i, j)
-
-            float cs = cnt > 0 ? sm / float(cnt) : 0.0
-            float rg = m.get(i, RG)
-            float en = m.get(i, EN)
-            float sc = 100.0 * (0.25 * cs + 0.20 * rg + 0.55 * en)
-
-            m.set(i, CS, cs)
-            m.set(i, SC, sc)
-        else
-            m.set(i, SC, -1.0)
-
-findSc(matrix<float> m, int x, int d) =>
-    float z = na
-
-    for i = 0 to N - 1
-        bool ok = m.get(i, OK) > 0.5
-        int px  = int(m.get(i, BX))
-        int pd  = int(m.get(i, DR))
-
-        if ok and px == x and pd == d
-            z := m.get(i, SC)
-            break
-
-    z
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
-
-// ~~ Scale Arrays {
-var array<Sw> sw = array.new<Sw>()
-
-if barstate.isfirst
-    for i = 0 to N - 1
-        sw.push(Sw.new(na, na, 0, 0, 0))
-
-int h1 = ta.highestbars(high, l1)
-int q1 = ta.lowestbars(low, l1)
-int h2 = ta.highestbars(high, l2)
-int q2 = ta.lowestbars(low, l2)
-int h3 = ta.highestbars(high, l3)
-int q3 = ta.lowestbars(low, l3)
-int h4 = ta.highestbars(high, l4)
-int q4 = ta.lowestbars(low, l4)
-int h5 = ta.highestbars(high, l5)
-int q5 = ta.lowestbars(low, l5)
-
-array<int> hs   = array.from(h1, h2, h3, h4, h5)
-array<int> qs   = array.from(q1, q2, q3, q4, q5)
-array<bool> ons = array.from(u1, u2, u3, u4, u5)
-array<bool> ch  = array.new<bool>(N, false)
-
-if barstate.isconfirmed
-    for i = 0 to N - 1
-        ch.set(i, turn(sw.get(i), hs.get(i), qs.get(i)))
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
-
-// ~~ Matrix Build {
-matrix<float> cf = matrix.new<float>(N, NC, na)
-
-put(cf, 0, u1, 1, l1, sw.get(0))
-put(cf, 1, u2, 2, l2, sw.get(1))
-put(cf, 2, u3, 3, l3, sw.get(2))
-put(cf, 3, u4, 4, l4, sw.get(3))
-put(cf, 4, u5, 5, l5, sw.get(4))
-
-matrix<float> ag = matrix.new<float>(N, N, 0.0)
-link(cf, ag)
-score(cf, ag)
-
-matrix<float> rk = cf.copy()
-rk.sort(SC, order.descending)
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
-
-// ~~ Anchor State {
-var int ai = 0
-var int al = na
-var int ad = 0
-var int ax = na
-var int asince = na
-var float ay   = na
-var float asc  = na
-var float oldH = na
-var float oldL = na
-
-var int sd = 0
-var int sx = na
-var int ox = na
-var float sy = na
-var float oy = na
-
-var label liveLab = na
-
-bool newA   = false
-bool flipUp = false
-bool flipDn = false
-string tag  = ""
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
-
-// ~~ Rank Selection {
-if barstate.isconfirmed
-    bool evt = false
-
-    for i = 0 to N - 1
-        evt := evt or (ons.get(i) and ch.get(i))
-
-    int mn = math.min(math.min(l1, l2), math.min(l3, math.min(l4, l5)))
-
-    if evt or (ai == 0 and b >= mn)
-        int wi = -1
-
-        for i = 0 to N - 1
-            bool ok  = rk.get(i, OK) > 0.5
-            float sc = rk.get(i, SC)
-            float en = rk.get(i, EN)
-
-            if ok and sc >= minQ and en >= minE
-                wi := i
+getPdhlBar(float value) =>
+    int x = int(na)
+    if value == pdh
+        for i = i_loop to 1 by 1
+            if (high[i] == pdh)
+                x := time[i]
                 break
-
-        if wi >= 0
-            array<float> w = rk.row(wi)
-
-            int wId  = int(w.get(ID))
-            int wLen = int(w.get(LN))
-            int wDir = int(w.get(DR))
-            int wBar = int(w.get(BX))
-            float wPx  = w.get(PY)
-            float wSc  = w.get(SC)
-            float live = findSc(cf, ax, ad)
-
-            if not na(live)
-                asc := live
-
-            bool same = ai != 0 and wDir == ad and math.abs(wPx - ay) <= SAT * tr and math.abs(wBar - ax) <= BAD
-            int age   = ai == 0 ? 100000 : b - nz(asince, b)
-            bool pass = ai == 0 or wDir != ad or na(asc) or wSc >= asc + MAR
-
-            if not same and age >= hold and pass
-                ai := wId
-                al := wLen
-                ad := wDir
-                ax := wBar
-                ay := wPx
-                asc := wSc
-                asince := b
-
-                sd := ad
-                sx := ax
-                sy := ay
-
-                newA := true
-
-                if ad > 0
-                    tag := na(oldL) ? "" : ay < oldL ? "LL" : "HL"
-                    oldL := ay
-                else
-                    tag := na(oldH) ? "" : ay > oldH ? "HH" : "LH"
-                    oldH := ay
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
-
-// ~~ Polarity Flip {
-if barstate.isconfirmed and ai != 0 and not newA
-    if shiftMode and not na(ay)
-        if ad < 0
-            if na(oy) or low < oy
-                oy := low
-                ox := b
-
-            if close >= ay and not na(oy) and not na(ox)
-                ad := 1
-                ax := ox
-                ay := oy
-                asc := minQ
-                asince := b
-
-                sd := ad
-                sx := ax
-                sy := ay
-
-                flipUp := true
-                tag  := na(oldL) ? "" : ay < oldL ? "LL" : "HL"
-                oldL := ay
-
-                int bb = b - ax
-                ox := ax
-                oy := high[bb]
-
-                for i = bb to 0 by 1
-                    if high[i] >= oy
-                        oy := high[i]
-                        ox := b - i
-
-        else if ad > 0
-            if na(oy) or high > oy
-                oy := high
-                ox := b
-
-            if close <= ay and not na(oy) and not na(ox)
-                ad := -1
-                ax := ox
-                ay := oy
-                asc := minQ
-                asince := b
-
-                sd := ad
-                sx := ax
-                sy := ay
-
-                flipDn := true
-                tag  := na(oldH) ? "" : ay > oldH ? "HH" : "LH"
-                oldH := ay
-
-                int bb = b - ax
-                ox := ax
-                oy := low[bb]
-
-                for i = bb to 0 by 1
-                    if low[i] <= oy
-                        oy := low[i]
-                        ox := b - i
-
-    else if not shiftMode and not na(sy)
-        if sd < 0
-            if na(oy) or low < oy
-                oy := low
-                ox := b
-
-            if close >= sy and not na(oy) and not na(ox)
-                sd := 1
-                sx := ox
-                sy := oy
-
-                flipUp := true
-                tag  := na(oldL) ? "" : sy < oldL ? "LL" : "HL"
-                oldL := sy
-
-                int bb = b - sx
-                ox := sx
-                oy := high[bb]
-
-                for i = bb to 0 by 1
-                    if high[i] >= oy
-                        oy := high[i]
-                        ox := b - i
-
-        else if sd > 0
-            if na(oy) or high > oy
-                oy := high
-                ox := b
-
-            if close <= sy and not na(oy) and not na(ox)
-                sd := -1
-                sx := ox
-                sy := oy
-
-                flipDn := true
-                tag  := na(oldH) ? "" : sy > oldH ? "HH" : "LH"
-                oldH := sy
-
-                int bb = b - sx
-                ox := sx
-                oy := low[bb]
-
-                for i = bb to 0 by 1
-                    if low[i] <= oy
-                        oy := low[i]
-                        ox := b - i
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
-
-// ~~ VWAP System {
-type Path
-    array<chart.point> pts
-    polyline live = na
-    int d = 0
-
-var Path ln = Path.new(array.new<chart.point>(), na, 0)
-var array<polyline> done = array.new<polyline>()
-
-var float pv = hlc3 * v
-var float vv = v
-var float vw = na
-
-if barstate.isconfirmed
-    if newA and not na(ax) and not na(ay)
-        int bb = b - ax
-
-        if bb >= 0 and bb < 5000
-            ln.live.delete()
-
-            if ln.pts.size() > 1
-                polyline seg = polyline.new(ln.pts, false, false, line_color = ln.d > 0 ? upC : dnC, line_width = wid)
-                done.push(seg)
-
-                if done.size() > 99
-                    polyline old = done.shift()
-                    old.delete()
-
-            ln.pts.clear()
-
-            float av = volAt(bb)
-            pv := ay * av
-            vv := av
-            vw := na
-
-            sd := ad
-            sx := ax
-            sy := ay
-            ox := ax
-            oy := sd > 0 ? high[bb] : low[bb]
-
-            for i = bb to 0 by 1
-                float alx = alpha(aptS[i])
-                float vi = volAt(i)
-
-                pv := (1.0 - alx) * pv + alx * hlc3[i] * vi
-                vv := (1.0 - alx) * vv + alx * vi
-                vw := vv > 0 ? pv / vv : na
-
-                ln.pts.push(chart.point.from_index(b - i, vw))
-
-                if sd > 0 and high[i] >= oy
-                    oy := high[i]
-                    ox := b - i
-                else if sd < 0 and low[i] <= oy
-                    oy := low[i]
-                    ox := b - i
-
-            ln.d := sd
-            ln.live := polyline.new(ln.pts, false, false, line_color = ln.d > 0 ? upC : dnC, line_width = wid)
-
-            string txt = tag + (showLen ? "\nL" + str.tostring(al) : "")
-
-            liveLab := label.new(sx, sy, txt, style = sd > 0 ? label.style_label_up : label.style_label_down, color = color.new(sd > 0 ? upL : dnL, 20), textcolor = color.white)
-
-    else if ai != 0
-        float alx = alpha(aptS)
-
-        pv := (1.0 - alx) * pv + alx * hlc3 * v
-        vv := (1.0 - alx) * vv + alx * v
-        vw := vv > 0 ? pv / vv : na
-
-        ln.live.delete()
-        ln.pts.push(chart.point.from_index(b, vw))
-
-        bool flip = flipUp or flipDn
-
-        if flip and shiftMode
-            if ln.pts.size() > 1
-                polyline seg = polyline.new(ln.pts, false, false, line_color = ln.d > 0 ? upC : dnC, line_width = wid)
-                done.push(seg)
-
-                if done.size() > 99
-                    polyline old = done.shift()
-                    old.delete()
-
-            ln.pts.clear()
-            ln.pts.push(chart.point.from_index(b, vw))
-
-            ln.d := sd
-            ln.live := polyline.new(ln.pts, false, false, line_color = ln.d > 0 ? upC : dnC, line_width = wid)
-        else
-            ln.d := sd
-            ln.live := polyline.new(ln.pts, false, false, line_color = ln.d > 0 ? upC : dnC, line_width = wid)
-
-        if flip
-            if not na(liveLab)
-                liveLab.delete()
-
-            string txt = tag + (showLen ? "\nL" + str.tostring(al) : "")
-
-            liveLab := label.new(sx, sy, txt, style = sd > 0 ? label.style_label_up : label.style_label_down, color = color.new(sd > 0 ? upL : dnL, 20), textcolor = color.white)
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
-
-// ~~ Alert State {
-bool xUpRaw = ta.crossover(close, vw)
-bool xDnRaw = ta.crossunder(close, vw)
-
-bool xUp = barstate.isconfirmed and ai != 0 and not newA and not flipUp and not flipDn and xUpRaw
-bool xDn = barstate.isconfirmed and ai != 0 and not newA and not flipUp and not flipDn and xDnRaw
-
-var int arm = 0
-
-bool rtUp = false
-bool rtDn = false
-
-if barstate.isconfirmed
-    if newA or flipUp or flipDn or ai == 0 or na(vw)
-        arm := 0
     else
-        float zone = rtZ * tr
-        float away = rtA * tr
-        bool touch = low <= vw + zone and high >= vw - zone
-        int prevArm = arm
+        for i = i_loop to 1 by 1
+            if (low[i] == pdl)
+                x := time[i]
+                break
+    x
 
-        if prevArm == 1 and sd > 0 and touch and close > vw and close >= open
-            rtUp := true
-            arm := 0
-        else if prevArm == -1 and sd < 0 and touch and close < vw and close <= open
-            rtDn := true
-            arm  := 0
-        else if close > vw + away
-            arm := 1
-        else if close < vw - away
-            arm := -1
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
+updateLastH() =>
+    array.push(arrLastH,lastH)
+    array.push(arrLastHBar,lastHBar)
 
-// ~~ Alert Logic {
-bool anyAlert = newA or flipUp or flipDn or xUp or xDn or rtUp or rtDn
+updateLastL() =>
+    array.push(arrLastL,lastL)
+    array.push(arrLastLBar,lastLBar)
 
-alertcondition(newA, "New ranked anchor", "A new matrix-ranked AVWAP anchor was accepted on {{ticker}} at {{close}}.")
-alertcondition(flipUp, "Bullish polarity flip", "Price closed above the active swing-high structure. The selected polarity mode applied its bullish flip behavior on {{ticker}} at {{close}}.")
-alertcondition(flipDn, "Bearish polarity flip", "Price closed below the active swing-low structure. The selected polarity mode applied its bearish flip behavior on {{ticker}} at {{close}}.")
-alertcondition(xUp, "Cross above AVWAP", "Price crossed above the active ranked AVWAP on {{ticker}} at {{close}}.")
-alertcondition(xDn, "Cross below AVWAP", "Price crossed below the active ranked AVWAP on {{ticker}} at {{close}}.")
-alertcondition(rtUp, "Bullish AVWAP retest", "Price retested the bullish ranked AVWAP as support on {{ticker}} at {{close}}.")
-alertcondition(rtDn, "Bearish AVWAP retest", "Price retested the bearish ranked AVWAP as resistance on {{ticker}} at {{close}}.")
-alertcondition(anyAlert, "Any ranked AVWAP event", "A ranked AVWAP anchor, polarity flip, cross, or retest event occurred on {{ticker}} at {{close}}.")
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
+getNLastValue(arr, n) =>
+    if array.size(arr) > n - 1
+        array.get(arr, array.size(arr) - n) 
+
+removeNLastLabel(arr, n) =>
+    if array.size(arr) > n - 1
+        label.delete(array.get(arr, array.size(arr) - n))
+
+removeNLastLine(arr, n) =>
+    if array.size(arr) > n - 1
+        line.delete(array.get(arr, array.size(arr) - n))    
+
+removeLastLabel(arr, n) =>
+    if array.size(arr) > n - 1
+        for i = 1 to n
+            label.delete(array.get(arr, array.size(arr) - i))
+
+removeLastLine(arr, n) =>
+    if array.size(arr) > n - 1
+        for i = 1 to n
+            line.delete(array.get(arr, array.size(arr) - i))
+
+removeIdm() =>
+    removeLastLabel(arrIdmLabel, 1)
+    removeLastLine(arrIdmLine, 1)
+
+fixStrcAfterBos() =>
+    removeLastLabel(arrBCLabel, 1)
+    removeLastLine(arrBCLine, 1)
+    removeIdm()
+    removeLastLabel(arrHLLabel, 2)
+    removeLastLabel(arrHLCircle, 2)
+
+fixStrcAfterChoch() =>
+    removeLastLabel(arrBCLabel, 2)
+    removeLastLine(arrBCLine, 2)
+    removeNLastLabel(arrHLLabel, 2)
+    removeNLastLabel(arrHLLabel, 3)
+    removeNLastLabel(arrHLCircle, 2)
+    removeNLastLabel(arrHLCircle, 3)
+    removeNLastLabel(arrIdmLabel, 2)
+    removeNLastLine(arrIdmLine, 2)
+
+drawIDM(bool trend) =>
+    [x, y] = getDirection(trend, idmLBar, idmHBar, idmLow, idmHigh)
+    colorText = trend and H_lastH > L_lastHH or not trend and H_lastLL > L_lastL ? color.red : colorIDM
+    if showIDM
+        ln = line.new(x, y, time, y, xloc.bar_time, color = colorIDM, style = line.style_dotted)
+        lbl = label.new(textCenter(time, x), y, IDM_TEXT, xloc.bar_time, color = transp, textcolor = colorText, style = getStyleLabel(not trend), size = size.small)
+        array.push(arrIdmLine,ln)
+        array.push(arrIdmLabel,lbl)
+    array.clear(trend ? puLow : puHigh)    
+    array.clear(trend ? puLBar : puHBar) 
+
+drawStructure(txt, trend) =>
+    [x, y] = getDirection(trend, lastHBar, lastLBar, lastH, lastL)
+    color = trend ? bull : bear
+    if txt == BOS_TEXT and showBOS
+        ln = line.new(x, y, time, y, xloc.bar_time, color = color, style = line.style_dashed)
+        lbl = label.new(textCenter(time, x), y, txt, xloc.bar_time, color = transp, style = getStyleLabel(trend), textcolor = color, size = size.small)
+        array.push(arrBCLine,ln)
+        array.push(arrBCLabel,lbl)
+    if txt == CHOCH_TEXT and showChoCh
+        ln = line.new(x, y, time, y, xloc.bar_time, color = color, style = line.style_dashed)
+        lbl = label.new(textCenter(time, x), y, txt, xloc.bar_time, color = transp, style = getStyleLabel(trend), textcolor = color, size = size.small)
+        array.push(arrBCLine,ln)
+        array.push(arrBCLabel,lbl)
+
+drawLiveStrc(bool condition, bool trend, color color1, color color2, string txt, int length) =>
+    line ln = line(na)
+    label lbl = label(na)
+    x2 = time + (time - time[1]) * length
+    colorText = trend ? color1 : color2
+    if barstate.islast and condition
+        [x, y] = switch
+            txt == BOS_TEXT => [trend ? lastHBar : lastLBar, trend ? lastH : lastL]
+            txt == CHOCH_TEXT => [trend ? lastHBar : lastLBar, trend ? lastH : lastL]
+            txt == IDM_TEXT => [trend ? idmLBar : idmHBar, trend ? idmLow : idmHigh]
+            txt == MID_TEXT => [math.min(lastHBar, lastLBar), math.avg(lastH, lastL)]
+            txt == PDH_TEXT => [getPdhlBar(pdh), pdh]
+            txt == PDL_TEXT => [getPdhlBar(pdl), pdl]
+        _txt = txt + " - " + str.tostring(y)
+        ln := line.new(x, y, x2, y, xloc.bar_time, color = colorIDM, style = line.style_dotted)
+        lbl := label.new(x2, y, _txt, xloc.bar_time, color = transp, textcolor = colorText, style = label.style_label_left, size = size.small)
+    line.delete(ln[1])
+    label.delete(lbl[1])
+
+drawPullback(int x, float y, bool trend) =>
+    color = trend ? bear : bull
+    if showMn 
+        label.new(x, y, "", xloc.bar_time, getYloc(trend), color, getStyleArrow(trend), size = size.tiny )
+
+drawHL(bool trend, string txt) =>
+    [x, y] = getDirection(trend, HBar, LBar, H, L)
+    if showHL
+        lbl = label.new(x, y, txt, xloc.bar_time, color = transp, textcolor = colorHL, style = getStyleLabel(trend))
+        array.push(arrHLLabel, lbl)
+    if showCircleHL
+        colorCircle = trend ? color.new(bull, 55) : color.new(bear, 55)
+        lbl2 = label.new(x, y, '', xloc.bar_time, getYloc(trend), color = colorCircle, style = label.style_circle, size = size.tiny)     
+        array.push(arrHLCircle, lbl2)
+
+drawSweep(bool trend) =>
+    [x, y] = getDirection(trend, lastHBar, lastLBar, lastH, lastL)
+    if showSw
+        line.new(x, y, time, y, xloc.bar_time, color = colorSweep, style = line.style_dotted)
+        if markX
+            label.new(textCenter(time, x), y, "X", xloc.bar_time, color = transp, textcolor = colorSweep, style = getStyleLabel(trend), size = size.small)
+
+drawTP(H, L) =>
+    target = isCocUp ? high + math.abs(H - L) : low - math.abs(H - L)
+    target := target < 0 ? 0 : target
+    if showTP
+        line.new(bar_index, isCocUp ? high : low, bar_index, target, color = colorTP, style = line.style_arrow_right)  
+
+createBox(left, right, top, bottom, color) => 
+    box.new(left=left, right=right, top=top, bottom=bottom, xloc = xloc.bar_time, bgcolor=color, border_color=color, extend = extend.right)
+
+removeZone(zoneArray, box zone) =>
+    index = array.indexof(zoneArray, zone)
+    box.delete(zone)
+    array.remove(zoneArray, index)
+
+marginZone(zone) => [box.get_top(zone), box.get_bottom(zone), box.get_left(zone)]
+
+handleZone(zoneArray, left, top, bot, color) =>
+    _top = top
+    _bot = bot
+    _left = left    
+
+    zone = getNLastValue(zoneArray, 1)
+
+    [topZone, botZone, leftZone] = marginZone(zone)
+    rangeTop = math.abs(_top-topZone)/(topZone-botZone) < mergeRatio
+    rangeBot = math.abs(_bot-botZone)/(topZone-botZone) < mergeRatio
+
+    //Merge zone
+    if _top >= topZone and _bot <= botZone or rangeTop or rangeBot
+        _top := math.max(_top,topZone)
+        _bot := math.min(_bot,botZone)
+        _left := leftZone 
+        removeZone(zoneArray, zone)     
+
+    if not (_top <= topZone and _bot >= botZone)
+        array.push(zoneArray, createBox(_left, time, _top, _bot, color))
+
+processZones(zones, isSupply) =>
+    if array.size(zones) > 0
+        for i = array.size(zones) - 1 to 0 by 1
+            zone = array.get(zones, i)
+            [topZone, botZone, leftZone] = marginZone(zone)
+            
+            //Breaker block zones
+            if isSupply and low < botZone and close > topZone
+                array.push(demandZone, createBox(leftZone, time, topZone, botZone, colorDemand))
+            else if not isSupply and high > topZone and close < botZone
+                array.push(supplyZone, createBox(leftZone, time, topZone, botZone, colorSupply))
+            //Mitigated zones
+            else if (isSupply and high >= botZone and high < topZone) or (not isSupply and low <= topZone and low > botZone)
+                box.set_right(zone, time)
+                box.set_extend(zone,extend.none) 
+                box.set_bgcolor(zone, colorMitigated)
+                box.set_border_color(zone, colorMitigated) 
+
+            //Delete sweep zones    
+            if (time - leftZone > len*maxBarHistory) or (isSupply and high >= topZone) or (not isSupply and low <= botZone)
+                removeZone(zones, zone)                
+
+scob(zones, isSupply) =>
+    [topZone, botZone, leftZone] = marginZone(getNLastValue(zones, 1))
+
+    if not isb[1]
+        if not isSupply and low[1] < low[2] and low[1] < low and close > high[1] and low[1] < topZone and low[1] > botZone
+            scobUp
+        else if isSupply and high[1] > high[2] and high[1] > high and close < low[1] and high[1] < topZone and high[1] > botZone
+            scobDn
+        else
+            color(na)
+    else
+        color(na)
+//#endregion
+
+
+//#region Outside Bar
+osb = high > top and low < bot
+
+//#endregion
+
+//#region Pullback
+if high >= top and low <= bot //notrend
+    if mnStrc != bool(na)
+        prevMnStrc := mnStrc ? true : false
+
+    if prevMnStrc
+        top_ := top
+        bar_ := bar
+    else
+        bot_ := bot
+        bar_ := bar
+
+    top := high
+    bot := low
+    bar := time
+    mnStrc := bool(na)
+
+if high >= top and low > bot //uptrend
+    if prevMnStrc and mnStrc == bool(na)
+        array.push(puHBar, bar_)
+        array.push(puHigh, top_)
+        array.push(puLBar, bar)
+        array.push(puLow, bot)
+        drawPullback(bar_, top_, true)
+        drawPullback(bar, bot, false)
+    else if (not prevMnStrc and mnStrc == bool(na)) or not mnStrc
+        array.push(puLBar, bar)
+        array.push(puLow, bot)
+        drawPullback(bar, bot, false)
+
+    top := high
+    bot := low
+    bar := time
+    prevMnStrc := bool(na)
+    mnStrc := true
+
+if high < top and low <= bot //downtrend
+    if not prevMnStrc and mnStrc == bool(na)
+        array.push(puHBar, bar)
+        array.push(puHigh, top)
+        array.push(puLBar, bar_)
+        array.push(puLow, bot_)
+        drawPullback(bar, top, true)
+        drawPullback(bar_, bot_, false)
+    else if (prevMnStrc and mnStrc == bool(na)) or mnStrc
+        array.push(puHBar, bar)
+        array.push(puHigh, top)
+        drawPullback(bar, top, true)
+
+    top := high
+    bot := low
+    bar := time
+    prevMnStrc := bool(na)
+    mnStrc := false
+
+//#region update IDM
+if high >= H
+    H := high
+    HBar := time
+    L_lastHH := low  
+    idmLow := getNLastValue(puLow, 1)
+    idmLBar := getNLastValue(puLBar, 1)
+
+if low <= L
+    L := low
+    LBar := time
+    H_lastLL := high
+    idmHigh := getNLastValue(puHigh, 1)
+    idmHBar := getNLastValue(puHBar, 1)
+
+//#endregion
+
+// #region structure mapping
+// Check for IDM
+if findIDM and isCocUp and isCocUp
+    if low < idmLow
+        findIDM := false
+        isBosUp := false
+        L := low
+        LBar := time 
+        if structure_type == "Choch with IDM" and idmLow == lastL
+            if isPrevBos
+                fixStrcAfterBos() 
+                lastL := getNLastValue(arrLastL, 1)    
+                lastLBar := getNLastValue(arrLastLBar, 1)    
+                lastH := H
+                lastHBar := HBar
+                drawIDM(true)
+                drawHL(true, 'HH')
+                updateLastH()
+                updateLastL()
+                H_lastH := getNLastValue(arrLastH, 1)
+            else
+                fixStrcAfterChoch()
+                isCocUp := false
+                isCocDn := true
+        else
+            lastH := H
+            lastHBar := HBar
+            drawIDM(true)
+            drawHL(true, 'HH')
+            updateLastH()
+            updateLastL()
+            H_lastH := getNLastValue(arrLastH, 1)
+
+
+if findIDM and isCocDn and isBosDn
+    if high > idmHigh
+        findIDM := false
+        isBosDn := false
+        H := high
+        HBar := time
+        if structure_type == "Choch with IDM" and idmHigh == lastH
+            if isPrevBos
+                fixStrcAfterBos()
+                lastH := getNLastValue(arrLastH, 1)    
+                lastHBar := getNLastValue(arrLastHBar, 1)   
+                lastL := L
+                lastLBar := LBar
+                drawIDM(false) 
+                drawHL(false, 'LL')
+                updateLastH()
+                updateLastL()
+                L_lastL := getNLastValue(arrLastL, 1)
+            else
+                fixStrcAfterChoch()  
+                isCocUp := true
+                isCocDn := false  
+        else
+            lastL := L
+            lastLBar := LBar
+            drawIDM(false) 
+            drawHL(false, 'LL')
+            updateLastH()
+            updateLastL()
+            L_lastL := getNLastValue(arrLastL, 1)
+
+
+//Check for ChoCh
+if isCocDn and high > lastH
+    if structure_type == "Choch without IDM" and idmHigh == lastH and close > idmHigh
+        removeIdm()
+    if close > lastH 
+        drawStructure(CHOCH_TEXT, true) //Confirm CocUp 
+        findIDM := true
+        isBosUp := true
+        isCocUp := true
+        isBosDn := false
+        isCocDn := false
+        isPrevBos := false
+        L_lastL := getNLastValue(arrLastL, 1) 
+        drawTP(lastH,lastL)
+    else
+        drawSweep(true)
+      
+if isCocUp and low < lastL
+    if structure_type == "Choch without IDM" and idmLow == lastL and close < idmLow
+        removeIdm()
+    if close < lastL
+        drawStructure(CHOCH_TEXT, false)  //Confirm CocDn
+        findIDM := true
+        isBosUp := false
+        isCocUp := false
+        isBosDn := true
+        isCocDn := true
+        isPrevBos := false
+        H_lastH := getNLastValue(arrLastH, 1)
+        drawTP(lastH,lastL)
+    else
+        drawSweep(false)
+
+//Check for BoS
+if not findIDM and not isBosUp and isCocUp
+    if high > lastH
+        if close > lastH
+            drawStructure(BOS_TEXT, true)  //Confirm BosUp
+            findIDM := true
+            isBosUp := true
+            isCocUp := true
+            isBosDn := false
+            isCocDn := false
+            isPrevBos := true
+            drawHL(false, 'HL')
+            lastL := L
+            lastLBar := LBar
+            L_lastL := L
+            drawTP(lastH,lastL)
+        else
+            drawSweep(true)
+
+if not findIDM and not isBosDn and isCocDn 
+    if low < lastL
+        if close < lastL
+            drawStructure(BOS_TEXT, false)  //Confirm BosDn
+            findIDM := true
+            isBosUp := false
+            isCocUp := false
+            isBosDn := true
+            isCocDn := true
+            isPrevBos := true
+            drawHL(true, 'LH')
+            lastH := H
+            lastHBar := HBar
+            H_lastH := H
+            drawTP(lastH,lastL)
+        else
+            drawSweep(false)
+//#endregion
+
+//#trigger update High and Low 
+
+if high > lastH
+    lastH := high
+    lastHBar := time
+
+if low < lastL
+    lastL := low
+    lastLBar := time
+
+//#endregion
+if showPOI
+    if not isSweepOBS
+        high_MOBS := high[3]
+        low_MOBS := low[3]
+        current_OBS := time[3]
+        if high_MOBS > high[4] and high_MOBS > high[2]
+            isSweepOBS := true
+    else
+        if low_MOBS > high[1]
+            handleZone(supplyZone, current_OBS, high_MOBS, low_MOBS, colorSupply)
+            isSweepOBS := false
+        else 
+            if poi_type == "Mother Bar" and isb[2]
+                high_MOBS := math.max(high_MOBS,motherHigh[2])
+                low_MOBS := math.min(low_MOBS,motherLow[2])
+                current_OBS := math.min(current_OBS,motherBar)    
+            else
+                high_MOBS := high[2]
+                low_MOBS := low[2]
+                current_OBS := time[2]        
+            
+    if not isSweepOBD
+        low_MOBD := low[3]
+        high_MOBD := high[3]
+        current_OBD := time[3]
+        if low_MOBD < low[4] and low_MOBD < low[2]
+            isSweepOBD := true
+    else
+        if high_MOBD < low[1]
+            handleZone(demandZone, current_OBD, high_MOBD, low_MOBD, colorDemand)
+            isSweepOBD := false
+        else 
+            if poi_type == "Mother Bar" and isb[2]
+                high_MOBD := math.max(high_MOBD,motherHigh[2])
+                low_MOBD := math.min(low_MOBD,motherLow[2])
+                current_OBD := math.min(current_OBD,motherBar)        
+            else
+                high_MOBD := high[2]
+                low_MOBD := low[2]
+                current_OBD := time[2]    
+//#endregion
+
+//#region run function
+barcolor(showSCOB ? scob(supplyZone, true) : na, -1)
+barcolor(showSCOB ? scob(demandZone, false) : na, -1)
+barcolor(showISB and isb ? colorISB : na, 0,title="InSide Bar")
+barcolor(osb and isGreenBar(0) and showOSB ? colorOSB_up : na)
+barcolor(osb and not isGreenBar(0) and showOSB ? colorOSB_down : na) 
+processZones(supplyZone, true)
+processZones(demandZone, false)
+drawLiveStrc(showliveIDM and findIDM, isCocUp, colorIDM, colorIDM, IDM_TEXT, lengIDM)
+drawLiveStrc(showliveChoch, not isCocUp, bull, bear, CHOCH_TEXT, lengChoch)
+drawLiveStrc(showliveBOS and not findIDM, isCocUp, bull, bear, BOS_TEXT, lengBos)
+drawLiveStrc(showPdhl, true, bull, bear, PDH_TEXT, lengPdhl)
+drawLiveStrc(showPdhl, false, bull, bear, PDL_TEXT, lengPdhl)
+drawLiveStrc(showMid, true, colorIDM, colorIDM, MID_TEXT, lengMid)
+//#endregion
