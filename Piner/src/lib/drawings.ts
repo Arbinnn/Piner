@@ -516,6 +516,41 @@ export function timeToLogical(candles: readonly Candle[], timeMs: number): numbe
 /** Every x-bearing prop, so the extent scan doesn't have to know each drawing's shape. */
 const X_PROPS = ['left', 'right', 'x', 'x1', 'x2'] as const;
 
+/** Every price-bearing prop, same idea for the vertical extent. */
+const Y_PROPS = ['top', 'bottom', 'y', 'y1', 'y2'] as const;
+
+/**
+ * The price range the drawings occupy, or `null` if none of them carry a price.
+ *
+ * A pane that holds ONLY drawings — a gauge or dial built from polylines, with no `plot()`
+ * anywhere — has nothing to give its price scale a range, and every drawing then fails to
+ * place. The host series is seeded from this instead.
+ */
+export function drawingsPriceExtent(drawings: readonly DrawObject[]): { min: number; max: number } | null {
+  let min = Infinity;
+  let max = -Infinity;
+
+  const consider = (value: unknown): void => {
+    const price = num(value);
+    if (price === null) return;
+    if (price < min) min = price;
+    if (price > max) max = price;
+  };
+
+  for (const d of drawings) {
+    for (const prop of Y_PROPS) consider(d.props[prop]);
+
+    const points = d.props.points;
+    if (!Array.isArray(points)) continue;
+    for (const point of points) {
+      if (point === null || typeof point !== 'object') continue;
+      consider((point as Record<string, unknown>).price);
+    }
+  }
+
+  return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null;
+}
+
 /**
  * The right-most bar index the drawings occupy. Profile-style scripts deliberately draw
  * tens of bars past the last candle, which would otherwise sit outside the default view.

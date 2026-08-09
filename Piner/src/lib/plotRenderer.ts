@@ -15,7 +15,7 @@ import {
 import type { CandleSeries, DrawObject, HLine, MarkerSeries, OutputCollector, PlotSeries } from '@heyphat/piner';
 import type { Candle } from '../types/candle';
 import { pineColorToRgba } from './color';
-import { DrawingsPrimitive, drawingsRightExtent } from './drawings';
+import { DrawingsPrimitive, drawingsPriceExtent, drawingsRightExtent } from './drawings';
 import { FillsPrimitive, resolveFills } from './fills';
 import { BackgroundPrimitive } from './backgrounds';
 
@@ -46,6 +46,16 @@ const HOST_SERIES_OPTIONS = {
   priceLineVisible: false,
   crosshairMarkerVisible: false,
 };
+
+/** The price span a plotless pane's host series must cover. */
+interface PriceExtent {
+  min: number;
+  max: number;
+}
+
+function sameExtent(a: PriceExtent | undefined, b: PriceExtent): boolean {
+  return a !== undefined && a.min === b.min && a.max === b.max;
+}
 
 function asNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
@@ -235,6 +245,8 @@ interface TrackedCandle {
 interface TrackedPaneHost {
   kind: 'panehost';
   paneIndex: number;
+  /** Price span this host is currently seeded to cover; undefined while it is whitespace-only. */
+  extent?: PriceExtent;
   api: ISeriesApi<'Line'>;
 }
 type Tracked = TrackedPlot | TrackedHline | TrackedPaneHost | TrackedCandle;
@@ -261,6 +273,8 @@ export class PlotRenderer {
   private backgroundHost: HostSeries | null = null;
   private markersPlugin: ISeriesMarkersPluginApi<Time> | null = null;
   private markersHost: HostSeries | null = null;
+  /** Set per render: the price span a plotless pane's host must cover. */
+  private hostExtent: PriceExtent | null = null;
 
   constructor(chart: IChartApi, candleSeries: ISeriesApi<'Candlestick'>) {
     this.chart = chart;
@@ -279,6 +293,9 @@ export class PlotRenderer {
   ): void {
     const seen = new Set<string>();
     const paneIndex = overlay ? OVERLAY_PANE : SEPARATE_PANE;
+    // Only matters when the pane ends up with no plot to host on; computing it is cheap and
+    // paneHostFor is reached from four different syncs, so resolve it once up front.
+    this.hostExtent = paneIndex === OVERLAY_PANE ? null : drawingsPriceExtent(drawings);
     this.syncPlots(outputs.plots, candles, paneIndex, seen);
     this.syncCandles(outputs.candles, candles, paneIndex, seen);
     this.syncBackground(outputs, candles, paneIndex, seen);
@@ -422,6 +439,11 @@ export class PlotRenderer {
    * whitespace-only series does not (and anything anchored to a scale-less series silently
    * fails to place). A hidden plot is skipped: lightweight-charts suppresses price lines and
    * primitives attached to an invisible series along with the series itself.
+   *
+   * When the pane has no plot at all — a gauge drawn purely from polylines, say — the host is
+   * seeded with REAL values spanning `hostExtent` rather than whitespace, and reports that
+   * range through `autoscaleInfoProvider`. Whitespace alone leaves the pane without a price
+   * scale, and every drawing on it silently fails to place.
    */
   private paneHostFor(paneIndex: number, candles: readonly Candle[], seen: Set<string>): HostSeries {
     if (paneIndex === OVERLAY_PANE) return this.candleSeries;
@@ -432,13 +454,32 @@ export class PlotRenderer {
 
     const key = `panehost:${paneIndex}`;
     seen.add(key);
+    const extent = this.hostExtent;
     const existing = this.tracked.get(key);
-    if (existing?.kind === 'panehost') return existing.api;
+
+    if (existing?.kind === 'panehost') {
+      if (extent && !sameExtent(existing.extent, extent)) this.seedPaneHost(existing.api, candles, extent);
+      return existing.api;
+    }
 
     const api = this.chart.addSeries(LineSeries, HOST_SERIES_OPTIONS, paneIndex);
-    api.setData(candlesToWhitespace(candles));
-    this.tracked.set(key, { kind: 'panehost', paneIndex, api });
+    if (extent) this.seedPaneHost(api, candles, extent);
+    else api.setData(candlesToWhitespace(candles));
+    this.tracked.set(key, { kind: 'panehost', paneIndex, api, extent: extent ?? undefined });
     return api;
+  }
+
+  /** Gives a plotless pane a price scale: a flat, fully transparent series that declares the
+   *  range the drawings actually occupy. */
+  private seedPaneHost(api: ISeriesApi<'Line'>, candles: readonly Candle[], extent: PriceExtent): void {
+    // A zero-height range gives lightweight-charts nothing to scale against, so open it up.
+    const pad = extent.max > extent.min ? 0 : 1;
+    const minValue = extent.min - pad;
+    const maxValue = extent.max + pad;
+    const level = (minValue + maxValue) / 2;
+
+    api.applyOptions({ autoscaleInfoProvider: () => ({ priceRange: { minValue, maxValue } }) });
+    api.setData(candles.map((c) => ({ time: c.time, value: level })));
   }
 
   /**
