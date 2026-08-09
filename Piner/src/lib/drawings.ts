@@ -26,6 +26,18 @@ function str(value: unknown, fallback: string): string {
   return typeof value === 'string' ? value : fallback;
 }
 
+/**
+ * An explicit Pine `na`, which piner marks as `{ __na: true }`.
+ *
+ * This is NOT the same as an absent prop. Omitting `color` means "use the Pine default";
+ * passing `color = na` means "do not paint this". Scripts gate optional drawings exactly that
+ * way — `color = showSignal ? Up : na` — so collapsing the two makes a switched-off drawing
+ * render in the fallback grey instead of disappearing.
+ */
+function isNa(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && (value as { __na?: unknown }).__na === true;
+}
+
 /** Below these box dimensions text is unreadable, so it is dropped rather than smeared. */
 const MIN_TEXT_HEIGHT = 8;
 const MIN_TEXT_WIDTH = 10;
@@ -284,6 +296,8 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
   }
 
   private drawLine(ctx: CanvasRenderingContext2D, props: Record<string, unknown>, geometry: Geometry): void {
+    if (isNa(props.color)) return;
+
     const xloc = str(props.xloc, 'bar_index');
     const extend = str(props.extend, 'none');
     const x1 = geometry.x(props.x1, xloc);
@@ -364,7 +378,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     }
 
     const width = num(props.line_width) ?? 1;
-    if (width > 0) {
+    if (width > 0 && !isNa(props.line_color)) {
       ctx.strokeStyle = pineColorToRgba(typeof props.line_color === 'string' ? props.line_color : null);
       applyLineStyle(ctx, str(props.line_style, 'solid'), width);
       ctx.stroke();
@@ -383,7 +397,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     }
 
     const text = typeof props.text === 'string' ? props.text : '';
-    if (text.length === 0) return;
+    if (text.length === 0 || isNa(props.textcolor)) return;
 
     const fontSize = textSizePx(props.size);
     ctx.font = `${fontSize}px system-ui, sans-serif`;
@@ -424,6 +438,8 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     x: number,
     y: number,
   ): void {
+    if (isNa(props.color)) return;
+
     const r = shapeRadiusPx(props.size);
     ctx.fillStyle = pineColorToRgba(typeof props.color === 'string' ? props.color : null);
     ctx.beginPath();

@@ -20,6 +20,16 @@ import { FillsPrimitive, resolveFills } from './fills';
 import { BackgroundPrimitive } from './backgrounds';
 
 const STEP_STYLES = new Set(['stepline', 'steplinebr', 'stepline_diamond']);
+
+/**
+ * Pine's `*br` ("with breaks") styles, where `na` must CUT the line.
+ *
+ * This is the only thing separating `plot.style_linebr` from `plot.style_line`, and scripts
+ * lean on it hard: a two-state indicator plots one series for the bullish regime and another
+ * for the bearish, each `na` wherever the other is live. Join those gaps and both lines run
+ * the full width of the chart, overlapping, instead of handing off.
+ */
+const BREAK_ON_NA_STYLES = new Set(['linebr', 'steplinebr', 'areabr']);
 const OVERLAY_PANE = 0;
 const SEPARATE_PANE = 1;
 
@@ -62,13 +72,48 @@ function seriesLegendColor(colors: readonly (string | null)[]): string {
   return pineColorToRgba(null);
 }
 
+function plotPoint(plot: PlotSeries, candles: readonly Candle[], i: number, value: number): LineData<Time> {
+  const color = plot.colors[i];
+  return color ? { time: candles[i].time, value, color: pineColorToRgba(color) } : { time: candles[i].time, value };
+}
+
+/**
+ * Splits a plot into the contiguous runs of real values that a `*br` style must draw as
+ * SEPARATE lines, so `na` shows as a genuine gap.
+ *
+ * A whitespace point does not do this. lightweight-charts drops whitespace before it reaches
+ * the series (`seriesRows.filter(isSeriesPlotRow)`) — it only widens the time scale — and the
+ * line renderer then walks whatever points remain and joins them, drawing a long diagonal
+ * straight across the gap. One series per run is what actually breaks the line.
+ *
+ * ponytail: one LWC series per run. Fine at the tens-of-flips a regime indicator produces;
+ * a plot that alternated na every other bar over thousands of bars would want a single
+ * canvas primitive stroking the runs instead.
+ */
+function splitPlotRuns(plot: PlotSeries, candles: readonly Candle[]): LineData<Time>[][] {
+  const runs: LineData<Time>[][] = [];
+  let current: LineData<Time>[] = [];
+
+  for (let i = 0; i < plot.data.length && i < candles.length; i += 1) {
+    const value = plot.data[i];
+    if (!Number.isFinite(value)) {
+      if (current.length > 0) runs.push(current);
+      current = [];
+      continue;
+    }
+    current.push(plotPoint(plot, candles, i, value));
+  }
+  if (current.length > 0) runs.push(current);
+  return runs;
+}
+
+/** Every real value as one continuous line: `na` is skipped and the gap joins, which is what
+ *  the non-`br` Pine styles mean. */
 function plotToLineData(plot: PlotSeries, candles: readonly Candle[]): LineData<Time>[] {
   const points: LineData<Time>[] = [];
   for (let i = 0; i < plot.data.length && i < candles.length; i += 1) {
     const value = plot.data[i];
-    if (!Number.isFinite(value)) continue; // na -> gap, not a whitespace point (LWC fills gaps between points automatically)
-    const color = plot.colors[i];
-    points.push(color ? { time: candles[i].time, value, color: pineColorToRgba(color) } : { time: candles[i].time, value });
+    if (Number.isFinite(value)) points.push(plotPoint(plot, candles, i, value));
   }
   return points;
 }
@@ -282,24 +327,36 @@ export class PlotRenderer {
     seen: Set<string>,
   ): void {
     for (const [id, plot] of plots) {
-      const key = `plot:${id}`;
-      seen.add(key);
-      const existing = this.tracked.get(key);
-      const api =
-        existing?.kind === 'plot' && existing.paneIndex === paneIndex
-          ? existing.api
-          : this.recreatePlotSeries(key, existing, paneIndex);
-
+      const style = typeof plot.options.style === 'string' ? plot.options.style : '';
+      // A `*br` plot becomes one series per unbroken run; everything else stays a single
+      // series whose `na` gaps are joined, which is what the non-`br` styles mean.
+      const runs = BREAK_ON_NA_STYLES.has(style) ? splitPlotRuns(plot, candles) : [plotToLineData(plot, candles)];
       const visible = isVisible(plot.options);
-      api.applyOptions({
-        title: plot.title,
-        color: seriesLegendColor(plot.colors),
-        lineWidth: asLineWidth(plot.options.linewidth),
-        lineType: lineTypeFor(plot.options),
-        visible,
+
+      runs.forEach((points, run) => {
+        // Run 0 keeps the plain `plot:<id>` key so a non-broken plot's series is reused
+        // untouched across re-runs; extra runs get suffixed keys and `sweep` collects any
+        // that a later run no longer produces.
+        const key = run === 0 ? `plot:${id}` : `plot:${id}#${run}`;
+        seen.add(key);
+        const existing = this.tracked.get(key);
+        const api =
+          existing?.kind === 'plot' && existing.paneIndex === paneIndex
+            ? existing.api
+            : this.recreatePlotSeries(key, existing, paneIndex);
+
+        api.applyOptions({
+          // One legend entry and one price label for the whole plot, not one per run.
+          title: run === 0 ? plot.title : '',
+          color: seriesLegendColor(plot.colors),
+          lineWidth: asLineWidth(plot.options.linewidth),
+          lineType: lineTypeFor(plot.options),
+          visible,
+          lastValueVisible: run === runs.length - 1,
+        });
+        api.setData(points);
+        this.tracked.set(key, { kind: 'plot', paneIndex, api, visible });
       });
-      api.setData(plotToLineData(plot, candles));
-      this.tracked.set(key, { kind: 'plot', paneIndex, api, visible });
     }
     if (paneIndex !== OVERLAY_PANE && plots.size > 0) this.ensurePaneHeight();
   }

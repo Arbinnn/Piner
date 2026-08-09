@@ -1,328 +1,296 @@
-
 // This work is licensed under Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
 // https://creativecommons.org/licenses/by-nc-sa/4.0/
 // © Zeiierman {
 //@version=6
-indicator("Doji Volume Map (Zeiierman)", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500)
+indicator('SuperTrend Cluster (Zeiierman)', max_labels_count = 200, overlay = true, max_bars_back = 2000, behind_chart = false)
 //}
 
 // ~~ Tooltips {
-var string t1  = "How many bars back the script scans to find qualifying candles. Higher values show more historical signals but use more chart resources."
-var string t2  = "Length of the average volume calculation used as the baseline for relative volume. Larger values smooth the benchmark more."
-var string t3  = "Minimum multiple of average volume required for a candle to qualify. Example: 1.5 means current volume must be at least 1.5x the average volume."
-var string t4  = "Maximum candle body size allowed, expressed as a percentage of the full candle range. Lower values require a more doji-like candle."
-var string t5  = "Minimum candle range required, measured as a fraction of ATR. Helps ignore very small candles that look like dojis but have little significance."
+var string t1  = "Minimum weighted agreement required for the bullish or bearish cluster to become valid. Higher values demand stronger alignment across the SuperTrend set."
+var string t2  = "Selects which one of the five SuperTrend members is used as the base reference for flip markers, label placement, and final direction alignment."
+var string t3  = "Colors the candles and bars using the live cluster strength gradient. When disabled, chart candles keep their default chart colors."
+var string t4  = "Shows or hides the Bull Cluster and Bear Cluster labels when the selected base SuperTrend flips."
+var string t5  = "Shows or hides the small base SuperTrend flip markers plotted at the selected base SuperTrend line."
+var string t6  = "Main bullish color used for bullish trend lines, bullish labels, bullish markers, and bullish candle coloring."
+var string t7  = "Main bearish color used for bearish trend lines, bearish labels, bearish markers, and bearish candle coloring."
+var string t8  = "Neutral midpoint color used by the bar and candle gradient when bullish and bearish cluster pressure is balanced."
 
-var string t6  = "Show or hide the bubble markers on qualifying candles."
-var string t7  = "Show or hide projected horizontal levels from qualifying bubbles."
-var string t8  = "Maximum number of projected levels or merged zones to display from the current lookback window."
-var string t9  = "Use bullish and bearish colors based on candle direction. When disabled, all bubbles and levels use the neutral color."
-var string t10 = "Color used for bullish qualifying candles when Bull/Bear Bubble Color is enabled."
-var string t11 = "Color used for bearish qualifying candles when Bull/Bear Bubble Color is enabled."
-var string t12 = "Fallback color used when Bull/Bear Bubble Color is disabled."
+var string t9  = "ATR length for SuperTrend 1. Lower values react faster to price changes, while higher values make this member slower and smoother."
+var string t10 = "ATR multiplier for SuperTrend 1. Higher values place the band farther from price and reduce sensitivity."
+var string t11 = "Smoothing method applied to the source before SuperTrend 1 is calculated."
+var string t12 = "Length of the smoothing used for SuperTrend 1. Higher values smooth more but add lag."
+var string t13 = "Relative influence of SuperTrend 1 inside the weighted cluster. Higher values make this member contribute more to the final consensus."
 
-var string t13 = "When enabled, projected levels that are close together are combined into a single zone box instead of being shown as separate lines."
-var string t14 = "Maximum distance between levels, measured in ATR units, for them to be merged into the same zone."
-var string t15 = "Transparency of merged zone boxes. Higher values make the box more transparent."
+var string t14 = "ATR length for SuperTrend 2. Lower values react faster to price changes, while higher values make this member slower and smoother."
+var string t15 = "ATR multiplier for SuperTrend 2. Higher values place the band farther from price and reduce sensitivity."
+var string t16 = "Smoothing method applied to the source before SuperTrend 2 is calculated."
+var string t17 = "Length of the smoothing used for SuperTrend 2. Higher values smooth more but add lag."
+var string t18 = "Relative influence of SuperTrend 2 inside the weighted cluster. Higher values make this member contribute more to the final consensus."
+
+var string t19 = "ATR length for SuperTrend 3. Lower values react faster to price changes, while higher values make this member slower and smoother."
+var string t20 = "ATR multiplier for SuperTrend 3. Higher values place the band farther from price and reduce sensitivity."
+var string t21 = "Smoothing method applied to the source before SuperTrend 3 is calculated."
+var string t22 = "Length of the smoothing used for SuperTrend 3. Higher values smooth more but add lag."
+var string t23 = "Relative influence of SuperTrend 3 inside the weighted cluster. Higher values make this member contribute more to the final consensus."
+
+var string t24 = "ATR length for SuperTrend 4. Lower values react faster to price changes, while higher values make this member slower and smoother."
+var string t25 = "ATR multiplier for SuperTrend 4. Higher values place the band farther from price and reduce sensitivity."
+var string t26 = "Smoothing method applied to the source before SuperTrend 4 is calculated."
+var string t27 = "Length of the smoothing used for SuperTrend 4. Higher values smooth more but add lag."
+var string t28 = "Relative influence of SuperTrend 4 inside the weighted cluster. Higher values make this member contribute more to the final consensus."
+
+var string t29 = "ATR length for SuperTrend 5. Lower values react faster to price changes, while higher values make this member slower and smoother."
+var string t30 = "ATR multiplier for SuperTrend 5. Higher values place the band farther from price and reduce sensitivity."
+var string t31 = "Smoothing method applied to the source before SuperTrend 5 is calculated."
+var string t32 = "Length of the smoothing used for SuperTrend 5. Higher values smooth more but add lag."
+var string t33 = "Relative influence of SuperTrend 5 inside the weighted cluster. Higher values make this member contribute more to the final consensus."
+
+var string t34 = "Fills the area between the active cluster SuperTrend line and a smoothed price reference with a translucent cloud."
+var string t35 = "Length of the smoothing used for the hidden price reference that the cloud fills toward. Higher values create a steadier, softer cloud."
+var string t36 = "Bullish cloud color used when the active cluster regime is bullish."
+var string t37 = "Bearish cloud color used when the active cluster regime is bearish."
+var string t38 = "Transparency of the cloud fill. Lower values are more solid, higher values are more subtle."
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
 
-// ~~ Inputs {
-string SIGNAL_GROUP = "Signal Logic"
-string STYLE_GROUP  = "Bubble Style"
-string MERGE_GROUP  = "Level Merging"
+// ~~ INPUT PARAMETERS {
+gCe = 'Cluster Engine'
+thr = input.float(0.60, 'Consensus Threshold', minval = 0.0, maxval = 1.0, step = 0.01, group = gCe, tooltip = t1)
+baseIx = input.int(3, 'Base SuperTrend Index', minval = 1, maxval = 5, group = gCe, tooltip = t2)
 
-lookbackInput       = input.int(200, "Lookback Length", minval = 20, maxval = 5000, group = SIGNAL_GROUP, tooltip = t1)
-volLengthInput      = input.int(20, "Volume Average Length", minval = 1, group = SIGNAL_GROUP, tooltip = t2)
-relVolMultInput     = input.float(1.3, "Relative Volume Multiplier", minval = 0.1, step = 0.1, group = SIGNAL_GROUP, tooltip = t3)
-bodyPctInput        = input.float(25.0, "Max Body % of Range", minval = 1, maxval = 100, step = 1, group = SIGNAL_GROUP, tooltip = t4)
-minRangeAtrFrac     = input.float(0.20, "Min Candle Range as ATR Fraction", minval = 0.0, step = 0.05, group = SIGNAL_GROUP, tooltip = t5)
+gVi = 'Visual Analytics'
+useBc = input.bool(true, 'Dynamic Bar Coloring', group = gVi, tooltip = t3)
+showLbl = input.bool(true, 'Show Cluster Labels', group = gVi, tooltip = t4)
+showDot = input.bool(true, 'Show Base SuperTrend Flip Dots', group = gVi, tooltip = t5)
 
-showBubblesInput    = input.bool(true, "Show Bubbles", inline = "show", group = STYLE_GROUP, tooltip = t6)
-projectLevelsInput  = input.bool(true, "Project Levels", inline = "show", group = STYLE_GROUP, tooltip = t7)
-levelsQtyInput      = input.int(8, "Max Projected Levels", minval = 1, maxval = 100, inline = "p", group = STYLE_GROUP, tooltip = t8)
-bullBearColorInput  = input.bool(true, "Bull/Bear Bubble Color", group = STYLE_GROUP, tooltip = t9)
-BULL_COLOR          = input.color(#089981, "", inline = "color", group = STYLE_GROUP, tooltip = t10)
-BEAR_COLOR          = input.color(#f23645, "", inline = "color", group = STYLE_GROUP, tooltip = t11)
-NEUTRAL_COLOR       = input.color(#787b86, "", inline = "color", group = STYLE_GROUP, tooltip = t12)
+cBu = input.color(color.new(color.lime, 0), 'Bull', group = gVi, inline = 'col', tooltip = t6)
+cBe = input.color(color.new(#f7525f, 0), 'Bear', group = gVi, inline = 'col', tooltip = t7)
+cN  = input.color(color.new(#ff9800, 0), 'Neutral', group = gVi, inline = 'col', tooltip = t6 + "\n\n" + t7 + "\n\n" + t8)
 
-mergeCloseLevels    = input.bool(true, "Merge Close Levels Into Box", group = MERGE_GROUP, tooltip = t13)
-mergeDistanceAtr    = input.float(0.25, "Merge Distance (ATR)", minval = 0.01, step = 0.01, group = MERGE_GROUP, tooltip = t14)
-boxTransparency     = input.int(85, "Box Transparency", minval = 0, maxval = 100, group = MERGE_GROUP, tooltip = t15)
+gCf = 'Cloud Fill'
+showCloud = input.bool(true, 'Show Cloud Fill', group = gCf, tooltip = t34)
+cloudLen = input.int(8, 'Cloud Reference Length', minval = 1, group = gCf, tooltip = t35)
+cCloudBu = input.color(color.new(color.lime, 0), 'Bull Cloud', group = gCf, inline = 'cf', tooltip = t36)
+cCloudBe = input.color(color.new(#f7525f, 0), 'Bear Cloud', group = gCf, inline = 'cf', tooltip = t37)
+cloudTransp = input.int(65, 'Cloud Transparency', minval = 0, maxval = 95, group = gCf, tooltip = t38)
+
+// ~~ SuperTrend 1 {
+gSt1 = 'SuperTrend 1'
+a1 = input.int(7, 'ATR Length', minval = 1, group = gSt1, inline = '1', tooltip = t9)
+f1 = input.float(1.5, 'Factor', minval = 0.01, step = 0.01, group = gSt1, inline = '1', tooltip = t9 + "\n\n" + t10)
+m1 = input.string('EMA', 'Smoothing', options = ['SMA', 'EMA', 'LSMA', 'WMA', 'HMA', 'RMA'], group = gSt1, inline = '1.', tooltip = t11)
+l1 = input.int(3, 'Length', minval = 1, group = gSt1, inline = '1.', tooltip = t11 + "\n\n" + t12)
+w1 = input.float(1.0, 'Weight', minval = 0.0, step = 0.1, group = gSt1, inline = 'w1', tooltip = t13)
+//}
+
+// ~~ SuperTrend 2 {
+gSt2 = 'SuperTrend 2'
+a2 = input.int(10, 'ATR Length', minval = 1, group = gSt2, inline = '2', tooltip = t14)
+f2 = input.float(2.0, 'Factor', minval = 0.01, step = 0.01, group = gSt2, inline = '2', tooltip = t14 + "\n\n" + t15)
+m2 = input.string('EMA', 'Smoothing', options = ['SMA', 'EMA', 'LSMA', 'WMA', 'HMA', 'RMA'], group = gSt2, inline = '2.', tooltip = t16)
+l2 = input.int(5, 'Length', minval = 1, group = gSt2, inline = '2.', tooltip = t16 + "\n\n" + t17)
+w2 = input.float(1.0, 'Weight', minval = 0.0, step = 0.1, group = gSt2, inline = 'w2', tooltip = t18)
+//}
+
+// ~~ SuperTrend 3 {
+gSt3 = 'SuperTrend 3'
+a3 = input.int(14, 'ATR Length', minval = 1, group = gSt3, inline = '3', tooltip = t19)
+f3 = input.float(2.5, 'Factor', minval = 0.01, step = 0.01, group = gSt3, inline = '3', tooltip = t19 + "\n\n" + t20)
+m3 = input.string('SMA', 'Smoothing', options = ['SMA', 'EMA', 'LSMA', 'WMA', 'HMA', 'RMA'], group = gSt3, inline = '3.', tooltip = t21)
+l3 = input.int(8, 'Length', minval = 1, group = gSt3, inline = '3.', tooltip = t21 + "\n\n" + t22)
+w3 = input.float(1.2, 'Weight', minval = 0.0, step = 0.1, group = gSt3, inline = 'w3', tooltip = t23)
+//}
+
+// ~~ SuperTrend 4 {
+gSt4 = 'SuperTrend 4'
+a4 = input.int(21, 'ATR Length', minval = 1, group = gSt4, inline = '4', tooltip = t24)
+f4 = input.float(3.0, 'Factor', minval = 0.01, step = 0.01, group = gSt4, inline = '4', tooltip = t24 + "\n\n" + t25)
+m4 = input.string('WMA', 'Smoothing', options = ['SMA', 'EMA', 'LSMA', 'WMA', 'HMA', 'RMA'], group = gSt4, inline = '4.', tooltip = t26)
+l4 = input.int(13, 'Length', minval = 1, group = gSt4, inline = '4.', tooltip = t26 + "\n\n" + t27)
+w4 = input.float(1.4, 'Weight', minval = 0.0, step = 0.1, group = gSt4, inline = 'w4', tooltip = t28)
+//}
+
+// ~~ SuperTrend 5 {
+gSt5 = 'SuperTrend 5'
+a5 = input.int(34, 'ATR Length', minval = 1, group = gSt5, inline = '5', tooltip = t29)
+f5 = input.float(4.0, 'Factor', minval = 0.01, step = 0.01, group = gSt5, inline = '5', tooltip = t29 + "\n\n" + t30)
+m5 = input.string('HMA', 'Smoothing', options = ['SMA', 'EMA', 'LSMA', 'WMA', 'HMA', 'RMA'], group = gSt5, inline = '5.', tooltip = t31)
+l5 = input.int(21, 'Length', minval = 1, group = gSt5, inline = '5.', tooltip = t31 + "\n\n" + t32)
+w5 = input.float(1.6, 'Weight', minval = 0.0, step = 0.1, group = gSt5, inline = 'w5', tooltip = t33)
+//}
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
 
-// ~~ Storage {
-var label[] bubbleLabels   = array.new<label>()
-var line[] projectedLines  = array.new<line>()
-var label[] levelLabels    = array.new<label>()
-var box[] mergedLevelBoxes = array.new<box>()
+// ~~ CONSTANTS & STYLING {
+EPS = 0.0000001
+N = 5
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
 
-// ~~ Series calculations {
-bodySize    = math.abs(close - open)
-candleRange = high - low
-bodyPct     = candleRange > 0 ? (bodySize / candleRange) * 100.0 : 100.0
+// ~~ HELPER FUNCTIONS {
+fMa(t, s, l) =>
+    ln = math.max(1, l)
+    switch t
+        'SMA'  => ta.sma(s, ln)
+        'EMA'  => ta.ema(s, ln)
+        'LSMA' => ta.linreg(s, ln, 0)
+        'WMA'  => ta.wma(s, ln)
+        'HMA'  => ta.hma(s, ln)
+        'RMA'  => ta.rma(s, ln)
+        => ta.sma(s, ln)
 
-volAvg      = ta.sma(volume, volLengthInput)
-volStd      = ta.stdev(volume, volLengthInput)
-volZ        = volStd != 0 ? (volume - volAvg) / volStd : 0.0
+fSt(src, atrLen, fac) =>
+    atr = ta.atr(math.max(1, atrLen))
+    ub0 = src + fac * atr
+    lb0 = src - fac * atr
 
-atrVal      = ta.atr(14)
-minRangeOk  = candleRange >= atrVal * minRangeAtrFrac
+    ub = ub0
+    ub := na(ub[1]) ? ub0 : (ub0 < ub[1] or src[1] > ub[1] ? ub0 : ub[1])
 
-relHighVol  = volume > volAvg * relVolMultInput
-volRising   = volume > volume[1]
-looseDoji   = candleRange > 0 and bodyPct <= bodyPctInput and minRangeOk
+    lb = lb0
+    lb := na(lb[1]) ? lb0 : (lb0 > lb[1] or src[1] < lb[1] ? lb0 : lb[1])
 
-signal      = relHighVol and volRising and looseDoji
-signalPrice = hl2
+    d = 1.0
+    d := na(d[1]) ? 1.0 : d[1] == -1.0 and src > ub[1] ? 1.0 : d[1] == 1.0 and src < lb[1] ? -1.0 : d[1]
+
+    st = d == 1.0 ? lb : ub
+    [st, d]
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
 
-// ~~ Buffer assignment {
-srcSignal = signal
-srcPrice  = signalPrice
-srcZ      = volZ
-srcCl     = close
-srcOp     = open
-srcVol    = volume
-srcHi     = high
-srcLo     = low
+// ~~ MULTI-SUPERTREND ENGINE {
+src = hlc3
 
-max_bars_back(srcSignal, 5000)
-max_bars_back(srcPrice, 5000)
-max_bars_back(srcZ, 5000)
-max_bars_back(srcCl, 5000)
-max_bars_back(srcOp, 5000)
-max_bars_back(srcVol, 5000)
-max_bars_back(srcHi, 5000)
-max_bars_back(srcLo, 5000)
+s1 = fMa(m1, src, l1)
+s2 = fMa(m2, src, l2)
+s3 = fMa(m3, src, l3)
+s4 = fMa(m4, src, l4)
+s5 = fMa(m5, src, l5)
+
+[st1, d1] = fSt(s1, a1, f1)
+[st2, d2] = fSt(s2, a2, f2)
+[st3, d3] = fSt(s3, a3, f3)
+[st4, d4] = fSt(s4, a4, f4)
+[st5, d5] = fSt(s5, a5, f5)
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
 
-// ~~ Helpers {
-get_bubble_size(float z) =>
-    string sz = size.tiny
-    if z > 5.0
-        sz := size.huge
-    else if z > 3.5
-        sz := size.large
-    else if z > 2.5
-        sz := size.normal
-    else if z > 1.8
-        sz := size.small
-    sz
+// ~~ ARRAYS FOR STORAGE {
+var array<float> wArr = array.new_float(0)
+var array<float> stArr = array.new_float(0)
+var array<float> dArr = array.new_float(0)
 
-get_tier_text(float z) =>
-    if z > 5.0
-        "Low"
-    else if z > 3.0
-        "Medium"
-    else
-        "High"
+if barstate.isfirst
+    array.push(wArr, w1), array.push(wArr, w2), array.push(wArr, w3), array.push(wArr, w4), array.push(wArr, w5)
+    for _ = 0 to N - 1
+        array.push(stArr, na)
+        array.push(dArr, na)
 
-get_zone_text(float maxZ) =>
-    if maxZ > 5.0
-        "Low"
-    else if maxZ > 3.0
-        "Medium"
-    else
-        "High"
+if array.size(wArr) != N or array.size(stArr) != N or array.size(dArr) != N
+    runtime.error('Array size mismatch. Expected 5 elements in all arrays.')
+
+array.set(stArr, 0, st1), array.set(stArr, 1, st2), array.set(stArr, 2, st3), array.set(stArr, 3, st4), array.set(stArr, 4, st5)
+array.set(dArr, 0, d1), array.set(dArr, 1, d2), array.set(dArr, 2, d3), array.set(dArr, 3, d4), array.set(dArr, 4, d5)
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
 
-// ~~ Rendering {
-if barstate.islast
-    if array.size(bubbleLabels) > 0
-        for l in bubbleLabels
-            label.delete(l)
-        array.clear(bubbleLabels)
+// ~~ CONSENSUS ENGINE {
+var matrix<float> mDat = matrix.new<float>(N, 3, na)
 
-    if array.size(projectedLines) > 0
-        for ln in projectedLines
-            line.delete(ln)
-        array.clear(projectedLines)
+if matrix.rows(mDat) != N or matrix.columns(mDat) != 3
+    runtime.error('Matrix size mismatch. Expected 5x3.')
 
-    if array.size(levelLabels) > 0
-        for lb in levelLabels
-            label.delete(lb)
-        array.clear(levelLabels)
+for i = 0 to N - 1
+    matrix.set(mDat, i, 0, array.get(dArr, i))
+    matrix.set(mDat, i, 1, array.get(wArr, i))
+    matrix.set(mDat, i, 2, array.get(stArr, i))
 
-    if array.size(mergedLevelBoxes) > 0
-        for bx in mergedLevelBoxes
-            box.delete(bx)
-        array.clear(mergedLevelBoxes)
+wSum = 0.0
+wBu = 0.0
+wBe = 0.0
+lnBuNum = 0.0
+lnBeNum = 0.0
 
-    if showBubblesInput
-        int labelX = bar_index + 35 + 0
-        float mergeThreshold = atrVal * mergeDistanceAtr
+for i = 0 to N - 1
+    d = matrix.get(mDat, i, 0)
+    w = matrix.get(mDat, i, 1)
+    st = matrix.get(mDat, i, 2)
 
-        float[] zoneTopArr   = array.new<float>()
-        float[] zoneBotArr   = array.new<float>()
-        float[] zoneMidArr   = array.new<float>()
-        float[] zoneMaxZArr  = array.new<float>()
-        float[] zoneDirArr   = array.new<float>()
-        int[]   zoneCountArr = array.new<int>()
-        int[]   zoneStartArr = array.new<int>()
+    wSum += w
 
-        int levelsCount = 0
+    if d > 0
+        wBu += w
+        lnBuNum += st * w
+    else if d < 0
+        wBe += w
+        lnBeNum += st * w
 
-        for i = 0 to lookbackInput - 1
-            if srcSignal[i]
-                color bubbleColor = bullBearColorInput
-                     ? (srcCl[i] >= srcOp[i] ? color.new(BULL_COLOR, 35) : color.new(BEAR_COLOR, 35))
-                     : color.new(NEUTRAL_COLOR, 35)
+wSum := math.max(wSum, EPS)
 
-                string bubbleSize = get_bubble_size(srcZ[i])
+scBu = wBu / wSum
+scBe = wBe / wSum
+scCl = scBu - scBe
+strCl = math.abs(scCl)
 
-                label bubble = label.new(
-                     x = bar_index - i,
-                     y = srcPrice[i],
-                     text = "",
-                     style = label.style_circle,
-                     color = bubbleColor,
-                     size = bubbleSize,
-                     tooltip =
-                         "Relative High Volume + Rising Volume + Loose Doji" +
-                         "\nZ-Score: " + str.tostring(srcZ[i], "#.##") +
-                         "\nVolume: " + str.tostring(srcVol[i], format.volume) +
-                         "\nBody %: " + str.tostring(
-                             (srcHi[i] - srcLo[i]) > 0 ? (math.abs(srcCl[i] - srcOp[i]) / (srcHi[i] - srcLo[i])) * 100.0 : 0.0,
-                             "#.##"
-                         )
-                )
-                array.push(bubbleLabels, bubble)
+lnBu = wBu > 0 ? lnBuNum / wBu : na
+lnBe = wBe > 0 ? lnBeNum / wBe : na
 
-                if projectLevelsInput and levelsCount < levelsQtyInput
-                    if mergeCloseLevels
-                        bool merged = false
-                        int zoneSize = array.size(zoneMidArr)
+baseRow = math.max(0, math.min(N - 1, baseIx - 1))
+stB = matrix.get(mDat, baseRow, 2)
+dB  = matrix.get(mDat, baseRow, 0)
 
-                        if zoneSize > 0
-                            for z = 0 to zoneSize - 1
-                                float zoneMid = array.get(zoneMidArr, z)
-                                if math.abs(srcPrice[i] - zoneMid) <= mergeThreshold
-                                    float oldTop   = array.get(zoneTopArr, z)
-                                    float oldBot   = array.get(zoneBotArr, z)
-                                    float oldMaxZ  = array.get(zoneMaxZArr, z)
-                                    float oldDir   = array.get(zoneDirArr, z)
-                                    int oldCount   = array.get(zoneCountArr, z)
-                                    int oldStart   = array.get(zoneStartArr, z)
+flipBu = ta.crossover(dB, 0)
+flipBe = ta.crossunder(dB, 0)
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
 
-                                    float newTop   = math.max(oldTop, srcPrice[i])
-                                    float newBot   = math.min(oldBot, srcPrice[i])
-                                    float newMid   = (newTop + newBot) / 2.0
-                                    float newMaxZ  = math.max(oldMaxZ, srcZ[i])
-                                    float thisDir  = srcCl[i] >= srcOp[i] ? 1.0 : -1.0
-                                    float newDir   = oldDir + thisDir
-                                    int newCount   = oldCount + 1
-                                    int newStart   = math.min(oldStart, bar_index - i)
+// ~~ FINAL FILTERED REGIME {
+isBu = scBu >= thr
+isBe = scBe >= thr
 
-                                    array.set(zoneTopArr, z, newTop)
-                                    array.set(zoneBotArr, z, newBot)
-                                    array.set(zoneMidArr, z, newMid)
-                                    array.set(zoneMaxZArr, z, newMaxZ)
-                                    array.set(zoneDirArr, z, newDir)
-                                    array.set(zoneCountArr, z, newCount)
-                                    array.set(zoneStartArr, z, newStart)
+okBu = isBu and dB > 0
+okBe = isBe and dB < 0
 
-                                    merged := true
-                                    break
+var float dLast = 0.0
+if okBu and not okBe
+    dLast := 1.0
+else if okBe and not okBu
+    dLast := -1.0
 
-                        if not merged
-                            array.push(zoneTopArr, srcPrice[i])
-                            array.push(zoneBotArr, srcPrice[i])
-                            array.push(zoneMidArr, srcPrice[i])
-                            array.push(zoneMaxZArr, srcZ[i])
-                            array.push(zoneDirArr, srcCl[i] >= srcOp[i] ? 1.0 : -1.0)
-                            array.push(zoneCountArr, 1)
-                            array.push(zoneStartArr, bar_index - i)
+lnCl = dLast > 0 ? lnBu : dLast < 0 ? lnBe : na
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
 
-                        levelsCount += 1
-                    else
-                        line lvl = line.new(
-                             x1 = bar_index - i,
-                             y1 = srcPrice[i],
-                             x2 = labelX,
-                             y2 = srcPrice[i],
-                             color = bubbleColor,
-                             style = line.style_dashed,
-                             width = 1,
-                             extend = extend.none
-                        )
-                        array.push(projectedLines, lvl)
+// ~~ VISUALIZATION {
+cBar = scCl > 0 ? color.from_gradient(strCl, 0.0, 1.0, cN, cBu) : color.from_gradient(strCl, 0.0, 1.0, cN, cBe)
 
-                        label tier = label.new(
-                             x = labelX,
-                             y = srcPrice[i],
-                             text = get_tier_text(srcZ[i]),
-                             style = label.style_label_left,
-                             textcolor = bubbleColor,
-                             color = color.new(chart.bg_color, 100),
-                             size = size.small
-                        )
-                        array.push(levelLabels, tier)
+barcolor(useBc ? cBar : na)
+plotcandle(useBc ? open : na, useBc ? high : na, useBc ? low : na, useBc ? close : na, color = useBc ? cBar : na, bordercolor = useBc ? cBar : na, wickcolor = useBc ? cBar : na)
 
-                        levelsCount += 1
+plotshape(ta.crossover(dLast, 0), 'Major Long', shape.labelup, location.belowbar, color.new(cBu, 30), size = size.tiny, text = '▲', textcolor = color.white)
+plotshape(ta.crossunder(dLast, 0), 'Major Short', shape.labeldown, location.abovebar, color.new(cBe, 30), size = size.tiny, text = '▼', textcolor = color.white)
 
-        if projectLevelsInput and mergeCloseLevels
-            int zoneSize = array.size(zoneMidArr)
+plotshape(showDot and flipBu ? stB : na, 'Base ST Long', shape.triangleup, location.absolute, dLast > 0 ? color.new(cBu, 40) : color.new(cBe, 40), size = size.tiny)
+plotshape(showDot and flipBe ? stB : na, 'Base ST Short', shape.triangledown, location.absolute, dLast > 0 ? color.new(cBu, 40) : color.new(cBe, 40), size = size.tiny)
 
-            if zoneSize > 0
-                for z = 0 to zoneSize - 1
-                    float zoneTop   = array.get(zoneTopArr, z)
-                    float zoneBot   = array.get(zoneBotArr, z)
-                    float zoneMid   = array.get(zoneMidArr, z)
-                    float zoneMaxZ  = array.get(zoneMaxZArr, z)
-                    float zoneDir   = array.get(zoneDirArr, z)
-                    int zoneCount   = array.get(zoneCountArr, z)
-                    int zoneStart   = array.get(zoneStartArr, z)
+if showLbl and flipBu
+    label.new(bar_index, stB, text = 'Bull Cluster\n' + str.tostring(scBu * 100.0, '#.#') + '%', color = color.new(cBu, 90), textcolor = cBu, style = label.style_label_up, yloc = yloc.price, size = size.small)
 
-                    color zoneBaseColor = bullBearColorInput
-                         ? (zoneDir >= 0 ? BULL_COLOR : BEAR_COLOR)
-                         : NEUTRAL_COLOR
+if showLbl and flipBe
+    label.new(bar_index, stB, text = 'Bear Cluster\n' + str.tostring(scBe * 100.0, '#.#') + '%', color = color.new(cBe, 90), textcolor = cBe, style = label.style_label_down, yloc = yloc.price, size = size.small)
 
-                    if zoneCount > 1
-                        float pad = math.max(syminfo.mintick * 2.0, mergeThreshold * 0.35)
+pUp = plot(dLast == 1 ? lnCl : na, 'Cluster Up Trend', color = cBu, style = plot.style_linebr, linewidth = 2)
+pDn = plot(dLast == -1 ? lnCl : na, 'Cluster Down Trend', color = cBe, style = plot.style_linebr, linewidth = 2)
 
-                        box zoneBox = box.new(
-                             left = math.max(zoneStart, bar_index - lookbackInput),
-                             top = zoneTop + pad,
-                             right = labelX,
-                             bottom = zoneBot - pad,
-                             border_color = color.new(zoneBaseColor, 15),
-                             border_width = 1,
-                             bgcolor = color.new(zoneBaseColor, boxTransparency)
-                        )
-                        array.push(mergedLevelBoxes, zoneBox)
+// Hidden active-line plot for cloud fill
+pCl = plot(lnCl, 'Active Cluster Line', color = color.new(chart.fg_color, 100), display = display.none)
 
-                        label zoneLbl = label.new(
-                             x = labelX,
-                             y = zoneMid,
-                             text = get_zone_text(zoneMaxZ),
-                             style = label.style_label_left,
-                             textcolor = zoneBaseColor,
-                             color = color.new(chart.bg_color, 100),
-                             size = size.small
-                        )
-                        array.push(levelLabels, zoneLbl)
-                    else
-                        line lvl = line.new(
-                             x1 = zoneStart,
-                             y1 = zoneMid,
-                             x2 = labelX,
-                             y2 = zoneMid,
-                             color = color.new(zoneBaseColor, 0),
-                             style = line.style_dashed,
-                             width = 1,
-                             extend = extend.none
-                        )
-                        array.push(projectedLines, lvl)
+// Hidden smoothed price reference for cloud fill
+cloudRef = ta.sma(hlc3, cloudLen)
+pRef = plot(cloudRef, 'Cloud Reference', color = color.new(chart.fg_color, 100), display = display.none)
 
-                        label tier = label.new(
-                             x = labelX,
-                             y = zoneMid,
-                             text = get_zone_text(zoneMaxZ),
-                             style = label.style_label_left,
-                             textcolor = zoneBaseColor,
-                             color = color.new(chart.bg_color, 100),
-                             size = size.small
-                        )
-                        array.push(levelLabels, tier)
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}                        
+cloudClr = showCloud ? dLast > 0 ? color.new(cCloudBu, cloudTransp) : dLast < 0 ? color.new(cCloudBe, cloudTransp) : na : na
+fill(pCl, pRef, lnCl, cloudRef, cloudClr, color(na))
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
+
+// ~~ ALERTS {
+alBu = ta.crossover(dLast, 0)
+alBe = ta.crossunder(dLast, 0)
+alAny = alBu or alBe
+
+alertcondition(alBu, 'Long', 'Bullish clustered SuperTrend signal')
+alertcondition(alBe, 'Short', 'Bearish clustered SuperTrend signal')
+alertcondition(alAny, 'Signal', 'Clustered SuperTrend signal')
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
