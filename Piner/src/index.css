@@ -1,15 +1,24 @@
 :root {
-  --bg: #0e1117;
-  --bg-panel: #131722;
-  --bg-inset: #0b0e14;
-  --border: #232734;
+  /* TradingView dark palette. Every surface and status colour in the app comes from here. */
+  --bg: #131722;
+  --bg-panel: #1e222d;
+  --bg-inset: #0f131c;
+  --bg-hover: #2a2e39;
+  --border: #2a2e39;
   --text: #d1d4dc;
   --text-dim: #787b86;
-  --accent: #4c82fb;
-  --accent-hover: #6a97ff;
-  --danger: #ef5350;
-  --warning: #d9a441;
-  --success: #26a69a;
+  --accent: #2962ff;
+  --accent-hover: #4d7dff;
+  --danger: #f23645;
+  --warning: #ff9800;
+  --success: #089981;
+  /* Semantic P&L tokens — the Strategy Tester colours every number through these. */
+  --positive: var(--success);
+  --negative: var(--danger);
+  --neutral: var(--text);
+  /* Numeric readouts use tabular figures so columns of prices/P&L line up. */
+  --rgb-positive: 8, 153, 129;
+  --rgb-negative: 242, 54, 69;
   --mono: ui-monospace, 'Cascadia Code', Consolas, 'SFMono-Regular', monospace;
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
 

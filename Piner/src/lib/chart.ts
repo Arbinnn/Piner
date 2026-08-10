@@ -9,13 +9,16 @@ import {
 
 /** Shared dark theme palette — used by both the chart canvas and CSS so they can't drift. */
 export const THEME = {
-  background: '#0e1117',
+  background: '#131722',
   text: '#d1d4dc',
-  grid: '#1c2230',
-  border: '#2a3040',
-  upColor: '#26a69a',
-  downColor: '#ef5350',
+  grid: '#1e222d',
+  border: '#2a2e39',
+  upColor: '#089981',
+  downColor: '#f23645',
   crosshair: '#758696',
+  /* Benchmark (buy & hold) line — deliberately neutral so it never reads as a P&L colour. */
+  benchmark: '#787b86',
+  accent: '#2962ff',
 } as const;
 
 /** Creates a dark-themed chart with crosshair, visible scales, and a candlestick series on pane 0. */

@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Bar, CompiledScript } from '@heyphat/piner';
+import type { IChartApi } from 'lightweight-charts';
 import { compileScript, runScript } from '../lib/pineRunner';
 import { resetToDefaults, toIndicatorInputs, toInputValues } from '../lib/inputSchema';
 import type { PlotRenderer } from '../lib/plotRenderer';
+import { detectPineScriptType } from '../strategy/strategyDetector';
+import type { PineScriptType } from '../strategy/types';
+import { useStrategy, type UseStrategyResult } from './useStrategy';
 import type { Candle, ConsoleEntry, ConsoleLevel } from '../types/candle';
 import type { IndicatorInput, InputValue } from '../types/inputs';
 
@@ -16,6 +20,7 @@ interface UsePineScriptArgs {
   bars: Bar[];
   ready: boolean;
   rendererRef: React.RefObject<PlotRenderer | null>;
+  chartRef: React.RefObject<IChartApi | null>;
 }
 
 interface UsePineScriptResult {
@@ -29,6 +34,9 @@ interface UsePineScriptResult {
   entries: ConsoleEntry[];
   title: string;
   overlay: boolean;
+  /** Live guess from the editor text; becomes authoritative after a successful compile. */
+  scriptType: PineScriptType;
+  strategy: UseStrategyResult;
 }
 
 const DEFAULT_SCRIPT = `//@version=5
@@ -50,16 +58,26 @@ function summarize(bars: number, plots: number, drawings: number, elapsedMs: str
 }
 
 /** Compile/run state machine. Recompiles only on Run; input changes re-run without recompiling. */
-export function usePineScript({ candles, bars, ready, rendererRef }: UsePineScriptArgs): UsePineScriptResult {
+export function usePineScript({
+  candles,
+  bars,
+  ready,
+  rendererRef,
+  chartRef,
+}: UsePineScriptArgs): UsePineScriptResult {
   const [source, setSource] = useState(DEFAULT_SCRIPT);
   const [isRunning, setIsRunning] = useState(false);
   const [inputs, setInputs] = useState<IndicatorInput[]>([]);
   const [entries, setEntries] = useState<ConsoleEntry[]>([]);
   const [title, setTitle] = useState('');
   const [overlay, setOverlay] = useState(true);
+  /** The compile verdict, tagged with the source it describes. */
+  const [compiledType, setCompiledType] = useState<{ source: string; type: PineScriptType } | null>(null);
 
   const compiledRef = useRef<CompiledScript | null>(null);
   const inputsRef = useRef<IndicatorInput[]>([]);
+  /** The source the current `compiledRef` came from — the strategy cache keys on it. */
+  const sourceRef = useRef(source);
   const hasAutoRunRef = useRef(false);
   const runSeqRef = useRef(0);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -68,12 +86,22 @@ export function usePineScript({ candles, bars, ready, rendererRef }: UsePineScri
     inputsRef.current = inputs;
   }, [inputs]);
 
+  /**
+   * Editor-text guess, so the UI can offer Strategy Tester before the first Run. The compiled
+   * verdict wins, but only for the exact source it came from — once the user types, the live
+   * detection takes over rather than advertising a stale mode.
+   */
+  const detectedType = useMemo(() => detectPineScriptType(source), [source]);
+  const scriptType = compiledType?.source === source ? compiledType.type : detectedType;
+
   const log = useCallback((level: ConsoleLevel, heading: string, message: string, line?: number, col?: number) => {
     setEntries((prev) => {
       const next = [...prev, { id: prev.length > 0 ? prev[prev.length - 1].id + 1 : 0, level, heading, message, line, col }];
       return next.length > MAX_CONSOLE_ENTRIES ? next.slice(next.length - MAX_CONSOLE_ENTRIES) : next;
     });
   }, []);
+
+  const strategy = useStrategy({ candles, rendererRef, chartRef, symbol: SYMBOL, timeframe: TIMEFRAME, log });
 
   /** Full pipeline: compile -> build input schema -> run -> render. Triggered by Run. */
   const run = useCallback(() => {
@@ -95,11 +123,25 @@ export function usePineScript({ candles, bars, ready, rendererRef }: UsePineScri
 
     const compiled = outcome.compiled!;
     compiledRef.current = compiled;
+    sourceRef.current = source;
     setTitle(compiled.metadata.title);
     setOverlay(compiled.metadata.overlay);
 
     const nextInputs = toIndicatorInputs(compiled.metadata.inputs, inputsRef.current);
     setInputs(nextInputs);
+
+    // strategy(...) takes the backtest path: same compile, same inputs, same renderer — the
+    // orders/trades/equity come from piner's broker instead of an OutputCollector alone.
+    if (compiled.metadata.isStrategy) {
+      setCompiledType({ source, type: 'strategy' });
+      renderer.clear();
+      void strategy.execute(compiled, source, toInputValues(nextInputs), true).finally(() => {
+        if (seq === runSeqRef.current) setIsRunning(false);
+      });
+      return;
+    }
+    setCompiledType({ source, type: 'indicator' });
+    strategy.clear();
 
     const startedAt = performance.now();
     runScript(compiled, bars, toInputValues(nextInputs), { symbol: SYMBOL, timeframe: TIMEFRAME })
@@ -140,13 +182,18 @@ export function usePineScript({ candles, bars, ready, rendererRef }: UsePineScri
         setIsRunning(false);
         log('error', 'Runtime Error', err instanceof Error ? err.message : String(err));
       });
-  }, [bars, candles, log, rendererRef, source]);
+  }, [bars, candles, log, rendererRef, source, strategy]);
 
   /** Re-runs the already-compiled script with new input values, reconciling series in place. */
   const runWithCurrentInputs = useCallback(() => {
     const renderer = rendererRef.current;
     const compiled = compiledRef.current;
     if (!renderer || !compiled || bars.length === 0) return;
+
+    if (compiled.metadata.isStrategy) {
+      void strategy.execute(compiled, sourceRef.current, toInputValues(inputsRef.current), false);
+      return;
+    }
 
     const seq = ++runSeqRef.current;
     runScript(compiled, bars, toInputValues(inputsRef.current), { symbol: SYMBOL, timeframe: TIMEFRAME })
@@ -162,7 +209,7 @@ export function usePineScript({ candles, bars, ready, rendererRef }: UsePineScri
         if (seq !== runSeqRef.current) return;
         log('error', 'Runtime Error', err instanceof Error ? err.message : String(err));
       });
-  }, [bars, candles, log, rendererRef]);
+  }, [bars, candles, log, rendererRef, strategy]);
 
   const scheduleRerun = useCallback(() => {
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
@@ -197,5 +244,18 @@ export function usePineScript({ candles, bars, ready, rendererRef }: UsePineScri
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
-  return { source, setSource, run, isRunning, inputs, setInputValue, resetInputs, entries, title, overlay };
+  return {
+    source,
+    setSource,
+    run,
+    isRunning,
+    inputs,
+    setInputValue,
+    resetInputs,
+    entries,
+    title,
+    overlay,
+    scriptType,
+    strategy,
+  };
 }

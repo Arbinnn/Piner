@@ -285,6 +285,12 @@ export class PlotRenderer {
   private backgroundHost: HostSeries | null = null;
   private markersPlugin: ISeriesMarkersPluginApi<Time> | null = null;
   private markersHost: HostSeries | null = null;
+  /** Backtest entry/exit markers. Separate plugin from the script's own `plotshape` markers so
+   *  a strategy's plots and its trades can be toggled independently. Always on the price pane. */
+  private strategyMarkersPlugin: ISeriesMarkersPluginApi<Time> | null = null;
+  private positionBackground: BackgroundPrimitive | null = null;
+  /** Strategy Tester "Strategy Plots" toggle — a global mute over each plot's own `display`. */
+  private plotsVisible = true;
   /** Set per render: the price span a plotless pane's host must cover. */
   private hostExtent: PriceExtent | null = null;
 
@@ -353,6 +359,55 @@ export class PlotRenderer {
     this.detachFills();
     this.detachBackground();
     this.detachMarkers();
+    this.clearStrategyOverlays();
+  }
+
+  /**
+   * Backtest entry/exit markers on the price pane.
+   *
+   * Owns its own markers plugin: `syncMarkers` is driven by the script's `plotshape`/`plotchar`
+   * output and is rewritten on every re-run, so sharing one plugin would make the two erase
+   * each other. Passing an empty array hides the trades without touching anything else.
+   */
+  setStrategyMarkers(markers: readonly SeriesMarker<Time>[]): void {
+    if (markers.length === 0 && this.strategyMarkersPlugin === null) return;
+    this.strategyMarkersPlugin ??= createSeriesMarkers(this.candleSeries, []);
+    this.strategyMarkersPlugin.setMarkers([...markers]);
+  }
+
+  /**
+   * Optional position tint: one faint band per bar a position was held over, painted by the
+   * same primitive `bgcolor()` uses. `null` removes it.
+   */
+  setPositionBackground(layer: readonly (string | null)[] | null): void {
+    if (!layer || layer.length === 0) {
+      this.positionBackground?.setData([], 0);
+      return;
+    }
+    if (!this.positionBackground) {
+      this.positionBackground = new BackgroundPrimitive();
+      this.candleSeries.attachPrimitive(this.positionBackground);
+    }
+    this.positionBackground.setData([layer], layer.length);
+  }
+
+  /** Hides/shows every plot series without re-running the script. A plot the script itself hid
+   *  (`display=display.none`) stays hidden either way. */
+  setPlotsVisible(visible: boolean): void {
+    this.plotsVisible = visible;
+    for (const entry of this.tracked.values()) {
+      if (entry.kind === 'plot') entry.api.applyOptions({ visible: entry.visible && visible });
+    }
+  }
+
+  private clearStrategyOverlays(): void {
+    this.plotsVisible = true;
+    this.strategyMarkersPlugin?.detach();
+    this.strategyMarkersPlugin = null;
+    if (this.positionBackground) {
+      this.candleSeries.detachPrimitive(this.positionBackground);
+      this.positionBackground = null;
+    }
   }
 
   private syncPlots(
@@ -391,7 +446,7 @@ export class PlotRenderer {
           color: seriesLegendColor(plot.colors),
           lineWidth: asLineWidth(plot.options.linewidth),
           lineType: lineTypeFor(plot.options),
-          visible,
+          visible: visible && this.plotsVisible,
           lastValueVisible: run === runs.length - 1,
         });
         api.setData(points);
