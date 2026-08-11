@@ -1,73 +1,240 @@
-// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
-// © Mysteriown
-
 //@version=4
-strategy(title="VWAP + Fibo Dev Extensions Strategy", overlay=true, pyramiding=5, commission_value=0.08)
+strategy(
+     "Rob Booker - ADX Breakout",
+     shorttitle="ADX Breakout",
+     overlay=true
+)
 
-// -------------------------------------
-// ------- Inputs Fibos Values ---------
-// -------------------------------------
+//---------------------------------------------------------
+// Inputs
+//---------------------------------------------------------
 
-fib1 = input(title="Fibo extension 1", type=input.float, defval=1.618)
-fib2 = input(title="Fibo extension 2", type=input.float, defval=2.618)
-reso = input(title="Resolution VWAP", type=input.resolution, defval="W")
-dev = input(title="Deviation value min.", type=input.integer, defval=150)
+adxSmoothPeriod = input(14, title="ADX Smoothing Period")
+adxPeriod = input(14, title="ADX Period")
+adxLowerLevel = input(18, title="ADX Lower Level")
 
+profitTargetMultiple = input(
+     1.0,
+     title="Profit Target Box Width Multiple"
+)
 
-// -------------------------------------
-// -------- VWAP Calculations ----------
-// -------------------------------------
+stopLossMultiple = input(
+     0.5,
+     title="Stop Loss Box Width Multiple"
+)
 
-t = time(reso)
-debut = na(t[1]) or t > t[1]
+boxLookBack = input(
+     20,
+     title="BreakoutBox Lookback Period"
+)
 
-addsource = hlc3 * volume
-addvol = volume
-addsource := debut ? addsource : addsource + addsource[1]
-addvol := debut ? addvol : addvol + addvol[1]
-VWAP = addsource / addvol
+enableDirection = input(
+     0,
+     title="Both(0), Long(1), Short(-1)"
+)
 
-sn = 0.0
-sn := debut ? sn : sn[1] + volume * (hlc3 - VWAP[1]) * (hlc3 - VWAP)
-sd = sqrt(sn / addvol)
+//---------------------------------------------------------
+// Directional Movement
+//---------------------------------------------------------
 
-Fibp2 = VWAP + fib2 * sd
-Fibp1 = VWAP + fib1 * sd
-Fibm1 = VWAP - fib1 * sd
-Fibm2 = VWAP - fib2 * sd
+dirmov(len) =>
+    up = change(high)
+    down = -change(low)
 
+    truerange = rma(tr(true), len)
 
-// -------------------------------------
-// -------------- Plots ----------------
-// -------------------------------------
+    plus = fixnan(
+         100 * rma(
+             up > down and up > 0 ? up : 0,
+             len
+         ) / truerange
+    )
 
-plot(VWAP, title="VWAP", color=color.orange)
-pFibp2 = plot(Fibp2, color=color.red)
-pFibp1 = plot(Fibp1, color=color.red)
-pFibm1 = plot(Fibm1, color=color.lime)
-pFibm2 = plot(Fibm2, color=color.lime)
+    minus = fixnan(
+         100 * rma(
+             down > up and down > 0 ? down : 0,
+             len
+         ) / truerange
+    )
 
-fill(pFibp2,pFibp1, color.red)
-fill(pFibm2,pFibm1, color.lime)
+    [plus, minus]
 
+//---------------------------------------------------------
+// ADX
+//---------------------------------------------------------
 
-// -------------------------------------
-// ------------ Positions --------------
-// -------------------------------------
+adx(dilen, adxlen) =>
+    [plus, minus] = dirmov(dilen)
 
-bull = crossunder(low[1],Fibm1[1]) and low[1]>=Fibm2[1] and low>Fibm2 and low<Fibm1 and sd>dev
-bear = crossover(high[1],Fibp1[1]) and high[1]<=Fibp2[1] and high<Fibp2 and high>Fibp1 and sd>dev
+    sum = plus + minus
 
-//plotshape(bear, title='Bear', style=shape.triangledown, location=location.abovebar, color=color.red, offset=0)
-//plotshape(bull, title='Bull', style=shape.triangleup, location=location.belowbar, color=color.green, offset=0)
+    adxValue = 100 * rma(
+         abs(plus - minus) /
+         (sum == 0 ? 1 : sum),
+         adxlen
+    )
 
+    adxValue
 
-// -------------------------------------
-// --------- Strategy Orders -----------
-// -------------------------------------
+//---------------------------------------------------------
+// Optional Directional Components
+//---------------------------------------------------------
 
-strategy.entry("Long", true, when = bull)
-strategy.close("Long", when = crossover(high,VWAP) or crossunder(low,Fibm2))
+adxHigh(dilen, adxlen) =>
+    [plus, minus] = dirmov(dilen)
+    plus
 
-strategy.entry("Short", false, when = bear)
-strategy.close("Short", when = crossunder(low,VWAP) or crossover(high,Fibp2))
+adxLow(dilen, adxlen) =>
+    [plus, minus] = dirmov(dilen)
+    minus
+
+//---------------------------------------------------------
+// ADX Condition
+//---------------------------------------------------------
+
+sig = adx(
+     adxSmoothPeriod,
+     adxPeriod
+)
+
+isADXLow = sig < adxLowerLevel
+
+//---------------------------------------------------------
+// Breakout Box
+//---------------------------------------------------------
+
+var float boxUpperLevel = na
+var float boxLowerLevel = na
+
+if strategy.position_size == 0
+    boxUpperLevel := highest(high, boxLookBack)[1]
+    boxLowerLevel := lowest(low, boxLookBack)[1]
+else
+    boxUpperLevel := boxUpperLevel[1]
+    boxLowerLevel := boxLowerLevel[1]
+
+boxWidth = boxUpperLevel - boxLowerLevel
+
+//---------------------------------------------------------
+// Take Profit
+//---------------------------------------------------------
+
+profitTarget =
+     strategy.position_size > 0 ?
+     strategy.position_avg_price +
+     profitTargetMultiple * boxWidth :
+     strategy.position_size < 0 ?
+     strategy.position_avg_price -
+     profitTargetMultiple * boxWidth :
+     na
+
+//---------------------------------------------------------
+// Stop Loss
+//---------------------------------------------------------
+
+stopLoss =
+     strategy.position_size > 0 ?
+     strategy.position_avg_price -
+     stopLossMultiple * boxWidth :
+     strategy.position_size < 0 ?
+     strategy.position_avg_price +
+     stopLossMultiple * boxWidth :
+     na
+
+//---------------------------------------------------------
+// Box Plots
+//---------------------------------------------------------
+
+plot(
+     boxUpperLevel,
+     title="Box Upper Level",
+     color=#000000,
+     linewidth=1
+)
+
+plot(
+     boxLowerLevel,
+     title="Box Lower Level",
+     color=#000000,
+     linewidth=1
+)
+
+// Highlight consolidation
+bgcolor(
+     isADXLow ? #800080 : na,
+     transp=85
+)
+
+// Stop loss
+plot(
+     stopLoss,
+     color=#FF0000,
+     linewidth=2,
+     title="StopLossLine"
+)
+
+// Profit target
+plot(
+     profitTarget,
+     color=#0000FF,
+     linewidth=2,
+     title="ProfitTargetLine"
+)
+
+//---------------------------------------------------------
+// Entry Conditions
+//---------------------------------------------------------
+
+isBuyValid =
+     strategy.position_size == 0 and
+     crossover(close, boxUpperLevel) and
+     isADXLow
+
+isSellValid =
+     strategy.position_size == 0 and
+     crossunder(close, boxLowerLevel) and
+     isADXLow
+
+//---------------------------------------------------------
+// Long Entry
+//---------------------------------------------------------
+
+entry_long =
+     isBuyValid and
+     strategy.opentrades == 0 and
+     (enableDirection == 1 or enableDirection == 0)
+
+strategy.entry(
+     "open_long",
+     strategy.long,
+     when=entry_long
+)
+
+strategy.exit(
+     id="close_long",
+     from_entry="open_long",
+     stop=stopLoss,
+     limit=profitTarget
+)
+
+//---------------------------------------------------------
+// Short Entry
+//---------------------------------------------------------
+
+entryShort =
+     isSellValid and
+     strategy.opentrades == 0 and
+     (enableDirection == -1 or enableDirection == 0)
+
+strategy.entry(
+     "open_short",
+     strategy.short,
+     when=entryShort
+)
+
+strategy.exit(
+     id="close_short",
+     from_entry="open_short",
+     stop=stopLoss,
+     limit=profitTarget
+)
