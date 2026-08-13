@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useCandles } from './hooks/useCandles';
 import { useChart } from './hooks/useChart';
 import { usePineScript } from './hooks/usePineScript';
+import { useTheme } from './hooks/useTheme';
 import { Toolbar } from './components/Toolbar';
 import { PineEditor } from './components/PineEditor';
 import { Chart } from './components/Chart';
@@ -19,8 +20,9 @@ const TIMEFRAME = 'D';
 type DockTab = 'strategy' | 'console';
 
 function App(): React.JSX.Element {
+  const { theme, toggleTheme } = useTheme();
   const { candles, loading, error } = useCandles(SYMBOL, TIMEFRAME);
-  const { containerRef, chartRef, rendererRef } = useChart(candles);
+  const { containerRef, chartRef, rendererRef } = useChart(candles, theme);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   /** Which dock tab the user last picked while in strategy mode. */
   const [dockPreference, setDockPreference] = useState<DockTab>('strategy');
@@ -50,6 +52,8 @@ function App(): React.JSX.Element {
         canRun={!loading && candles.length > 0}
         onRun={run}
         scriptType={scriptType}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
 
       <div className="workspace" ref={workspaceRef}>

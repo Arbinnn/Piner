@@ -2,17 +2,20 @@
 
 .mode-badge {
   font-size: 10px;
+  font-weight: 600;
+  font-family: var(--mono);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 2px 6px;
-  border-radius: 3px;
+  letter-spacing: 0.08em;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   color: var(--text-dim);
 }
 
 .mode-badge--strategy {
   color: var(--accent);
-  border-color: var(--accent);
+  border-color: rgba(var(--rgb-accent), 0.4);
+  background: rgba(var(--rgb-accent), 0.1);
 }
 
 /* Bottom dock: console alone in indicator mode, tabbed with the tester in strategy mode. */
@@ -430,7 +433,7 @@
 
 .segmented__btn--active {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-fg);
 }
 
 /* Trades */
@@ -523,7 +526,7 @@
 }
 
 .trade-table__row--selected {
-  background: rgba(41, 98, 255, 0.18);
+  background: rgba(var(--rgb-accent), 0.18);
 }
 
 .trade-details {
@@ -776,8 +779,8 @@
 }
 
 .pill--active {
-  background: #f0f3fa;
-  color: #131722;
+  background: var(--accent);
+  color: var(--accent-fg);
   font-weight: 600;
 }
 

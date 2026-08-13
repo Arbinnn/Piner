@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { IChartApi, ISeriesApi } from 'lightweight-charts';
-import { createPineChart } from '../lib/chart';
+import { applyChartTheme, createPineChart, type ChartTheme } from '../lib/chart';
 import { PlotRenderer } from '../lib/plotRenderer';
 import type { Candle } from '../types/candle';
 
@@ -17,7 +17,7 @@ interface UseChartResult {
  * independent of whether a Pine script has run yet — and the one-time initial `fitContent()`,
  * so indicator re-runs (Step 11) never disturb the user's zoom/scroll afterwards.
  */
-export function useChart(candles: readonly Candle[]): UseChartResult {
+export function useChart(candles: readonly Candle[], theme: ChartTheme = 'dark'): UseChartResult {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -28,7 +28,7 @@ export function useChart(candles: readonly Candle[]): UseChartResult {
     const container = containerRef.current;
     if (!container) return;
 
-    const { chart, candleSeries } = createPineChart(container);
+    const { chart, candleSeries } = createPineChart(container, theme);
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     rendererRef.current = new PlotRenderer(chart, candleSeries);
@@ -64,6 +64,10 @@ export function useChart(candles: readonly Candle[]): UseChartResult {
       hasFitRef.current = true;
     }
   }, [candles]);
+
+  useEffect(() => {
+    if (chartRef.current) applyChartTheme(chartRef.current, theme);
+  }, [theme]);
 
   return { containerRef, chartRef, candleSeriesRef, rendererRef };
 }

@@ -1,26 +1,34 @@
 :root {
-  /* TradingView dark palette. Every surface and status colour in the app comes from here. */
-  --bg: #131722;
-  --bg-panel: #1e222d;
-  --bg-inset: #0f131c;
-  --bg-hover: #2a2e39;
-  --border: #2a2e39;
-  --text: #d1d4dc;
-  --text-dim: #787b86;
-  --accent: #2962ff;
-  --accent-hover: #4d7dff;
-  --danger: #f23645;
-  --warning: #ff9800;
-  --success: #089981;
+  /* Terminal-ticker palette — warm near-black surfaces, amber as the one accent, everything
+     else neutral. Every surface and status colour in the app comes from these tokens. */
+  --bg: #0b0d10;
+  --bg-panel: #14171b;
+  --bg-inset: #0e1013;
+  --bg-hover: #1d2126;
+  --border: #232830;
+  --text: #e9e7e0;
+  --text-dim: #83868c;
+  --accent: #f5a623;
+  --accent-hover: #ffb84d;
+  /* Text colour placed on top of an --accent-filled surface. */
+  --accent-fg: #17130a;
+  --danger: #ff5c5c;
+  --warning: #f5a623;
+  --success: #34d399;
   /* Semantic P&L tokens — the Strategy Tester colours every number through these. */
   --positive: var(--success);
   --negative: var(--danger);
   --neutral: var(--text);
   /* Numeric readouts use tabular figures so columns of prices/P&L line up. */
-  --rgb-positive: 8, 153, 129;
-  --rgb-negative: 242, 54, 69;
-  --mono: ui-monospace, 'Cascadia Code', Consolas, 'SFMono-Regular', monospace;
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --rgb-positive: 52, 211, 153;
+  --rgb-negative: 255, 92, 92;
+  --rgb-accent: 245, 166, 35;
+  --mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Code', Consolas, 'SFMono-Regular', monospace;
+  --sans: 'IBM Plex Sans', system-ui, 'Segoe UI', Roboto, sans-serif;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 10px;
 
   color-scheme: dark;
   font: 14px/1.5 var(--sans);
@@ -32,8 +40,35 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Light mode — warm paper surfaces, deep ochre accent (dark enough to carry white text). */
+:root[data-theme='light'] {
+  --bg: #faf8f4;
+  --bg-panel: #ffffff;
+  --bg-inset: #f2efe7;
+  --bg-hover: #ece7db;
+  --border: #e2ddcf;
+  --text: #1b1a17;
+  --text-dim: #6c6a63;
+  --accent: #b3690f;
+  --accent-hover: #995d0d;
+  --accent-fg: #fffaf0;
+  --danger: #d1435a;
+  --warning: #b3690f;
+  --success: #1f9d6e;
+  --rgb-positive: 31, 157, 110;
+  --rgb-negative: 209, 67, 90;
+  --rgb-accent: 179, 105, 15;
+  --shadow: 0 1px 2px rgba(20, 16, 8, 0.08);
+
+  color-scheme: light;
+}
+
 * {
   box-sizing: border-box;
+}
+
+body {
+  transition: background-color 0.15s, color 0.15s;
 }
 
 html,
@@ -45,6 +80,30 @@ body,
 
 body {
   overflow: hidden;
+}
+
+::selection {
+  background: rgba(var(--rgb-accent), 0.35);
+  color: var(--text);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bg-hover);
+  border-radius: 999px;
+  border: 2px solid var(--bg-panel);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
 }
 
 button {
@@ -64,4 +123,20 @@ h2,
 h3 {
   margin: 0;
   font-weight: 600;
+}
+
+/* One consistent focus treatment app-wide: amber ring, never an outline-less trap. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }

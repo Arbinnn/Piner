@@ -1,240 +1,110 @@
-//@version=4
-strategy(
-     "Rob Booker - ADX Breakout",
-     shorttitle="ADX Breakout",
-     overlay=true
-)
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// ©ChartPrime
 
-//---------------------------------------------------------
-// Inputs
-//---------------------------------------------------------
+//@version=5
+indicator("Radius Trend [ChartPrime]", overlay = true)
 
-adxSmoothPeriod = input(14, title="ADX Smoothing Period")
-adxPeriod = input(14, title="ADX Period")
-adxLowerLevel = input(18, title="ADX Lower Level")
+// --------------------------------------------------------------------------------------------------------------------
+// 𝙐𝙎𝙀𝙍 𝙄𝙉𝙋𝙐𝙏𝙎
+// --------------------------------------------------------------------------------------------------------------------
 
-profitTargetMultiple = input(
-     1.0,
-     title="Profit Target Box Width Multiple"
-)
+// @variable Step size for radius adjustment
+float step = input.float(0.15, "Radius Step", step = 0.001)
 
-stopLossMultiple = input(
-     0.5,
-     title="Stop Loss Box Width Multiple"
-)
+// @variable Multiplier for initial distance calculation
+float multi = input.float(2, "Start Points Distance", step = 0.1)
 
-boxLookBack = input(
-     20,
-     title="BreakoutBox Lookback Period"
-)
+// Initialize variables
+bool trend = na
+var float multi1 = 0.
+var float multi2 = 0.
+int n = 3
+var float band = 0.
 
-enableDirection = input(
-     0,
-     title="Both(0), Long(1), Short(-1)"
-)
+// --------------------------------------------------------------------------------------------------------------------
+// 𝙄𝙉𝘿𝙄𝘾𝘼𝙏𝙊𝙍 𝘾𝘼𝙇𝘾𝙐𝙇𝘼𝙏𝙄𝙊𝙉𝙎
+// --------------------------------------------------------------------------------------------------------------------
 
-//---------------------------------------------------------
-// Directional Movement
-//---------------------------------------------------------
+// Calculate distances for band placement
+float distance = ta.sma(math.abs(high - low), 100) * multi
+float distance1 = ta.sma(math.abs(high - low), 100) * 0.2
 
-dirmov(len) =>
-    up = change(high)
-    down = -change(low)
+// Initialize trend and band on the 101st bar
+if bar_index == 101
+    trend := true
+    band := low * 0.8
 
-    truerange = rma(tr(true), len)
+// Update trend based on price relation to band
+if close < band
+    trend := false
 
-    plus = fixnan(
-         100 * rma(
-             up > down and up > 0 ? up : 0,
-             len
-         ) / truerange
-    )
+if close > band
+    trend := true
 
-    minus = fixnan(
-         100 * rma(
-             down > up and down > 0 ? down : 0,
-             len
-         ) / truerange
-    )
+// Calculate trend change ONCE.
+// This avoids calling stateful ta.change() inside conditional branches.
+trend_change = ta.change(trend)
 
-    [plus, minus]
+// Adjust band on trend changes
+if trend[1] == false and trend_change
+    band := low - distance
 
-//---------------------------------------------------------
-// ADX
-//---------------------------------------------------------
+if trend[1] == true and trend_change
+    band := high + distance
 
-adx(dilen, adxlen) =>
-    [plus, minus] = dirmov(dilen)
+// Apply step angle to trend lines
+if bar_index % n == 0 and trend
+    multi1 := 0
+    multi2 += step
+    band += distance1 * multi2
 
-    sum = plus + minus
+if bar_index % n == 0 and not trend
+    multi1 += step
+    multi2 := 0
+    band -= distance1 * multi1
 
-    adxValue = 100 * rma(
-         abs(plus - minus) /
-         (sum == 0 ? 1 : sum),
-         adxlen
-    )
+// Smooth the band
+Sband = ta.sma(band, n)
 
-    adxValue
+// Set color based on trend
+color = trend ? #54b6d4 : #cf2b2b
 
-//---------------------------------------------------------
-// Optional Directional Components
-//---------------------------------------------------------
+// Calculate upper and lower bands
+band_upper = ta.sma(band + distance * 0.5, n)
+band_lower = ta.sma(band - distance * 0.5, n)
+band1 = trend ? band_upper : band_lower
 
-adxHigh(dilen, adxlen) =>
-    [plus, minus] = dirmov(dilen)
-    plus
+// --------------------------------------------------------------------------------------------------------------------
+// 𝙑𝙄𝙎𝙐𝘼𝙇𝙄𝙕𝘼𝙏𝙄𝙊𝙉
+// --------------------------------------------------------------------------------------------------------------------
 
-adxLow(dilen, adxlen) =>
-    [plus, minus] = dirmov(dilen)
-    minus
+// Plot the outer band
+plot(
+     band1,
+     color = bar_index % 2 == 0 ? color.new(chart.fg_color, 50) : na
+     )
 
-//---------------------------------------------------------
-// ADX Condition
-//---------------------------------------------------------
+// Plot the main band and fill area
+p1 = plot(
+     trend_change ? na : Sband,
+     style = plot.style_linebr,
+     color = color.gray
+     )
 
-sig = adx(
-     adxSmoothPeriod,
-     adxPeriod
-)
+p2 = plot(
+     ta.sma(hl2, 20),
+     display = display.none
+     )
 
-isADXLow = sig < adxLowerLevel
-
-//---------------------------------------------------------
-// Breakout Box
-//---------------------------------------------------------
-
-var float boxUpperLevel = na
-var float boxLowerLevel = na
-
-if strategy.position_size == 0
-    boxUpperLevel := highest(high, boxLookBack)[1]
-    boxLowerLevel := lowest(low, boxLookBack)[1]
-else
-    boxUpperLevel := boxUpperLevel[1]
-    boxLowerLevel := boxLowerLevel[1]
-
-boxWidth = boxUpperLevel - boxLowerLevel
-
-//---------------------------------------------------------
-// Take Profit
-//---------------------------------------------------------
-
-profitTarget =
-     strategy.position_size > 0 ?
-     strategy.position_avg_price +
-     profitTargetMultiple * boxWidth :
-     strategy.position_size < 0 ?
-     strategy.position_avg_price -
-     profitTargetMultiple * boxWidth :
+fill(
+     p1,
+     p2,
+     band,
+     ta.sma(hl2, 20),
+     color.new(color, 60),
      na
+     )
 
-//---------------------------------------------------------
-// Stop Loss
-//---------------------------------------------------------
+// --------------------------------------------------------------------------------------------------------------------
 
-stopLoss =
-     strategy.position_size > 0 ?
-     strategy.position_avg_price -
-     stopLossMultiple * boxWidth :
-     strategy.position_size < 0 ?
-     strategy.position_avg_price +
-     stopLossMultiple * boxWidth :
-     na
-
-//---------------------------------------------------------
-// Box Plots
-//---------------------------------------------------------
-
-plot(
-     boxUpperLevel,
-     title="Box Upper Level",
-     color=#000000,
-     linewidth=1
-)
-
-plot(
-     boxLowerLevel,
-     title="Box Lower Level",
-     color=#000000,
-     linewidth=1
-)
-
-// Highlight consolidation
-bgcolor(
-     isADXLow ? #800080 : na,
-     transp=85
-)
-
-// Stop loss
-plot(
-     stopLoss,
-     color=#FF0000,
-     linewidth=2,
-     title="StopLossLine"
-)
-
-// Profit target
-plot(
-     profitTarget,
-     color=#0000FF,
-     linewidth=2,
-     title="ProfitTargetLine"
-)
-
-//---------------------------------------------------------
-// Entry Conditions
-//---------------------------------------------------------
-
-isBuyValid =
-     strategy.position_size == 0 and
-     crossover(close, boxUpperLevel) and
-     isADXLow
-
-isSellValid =
-     strategy.position_size == 0 and
-     crossunder(close, boxLowerLevel) and
-     isADXLow
-
-//---------------------------------------------------------
-// Long Entry
-//---------------------------------------------------------
-
-entry_long =
-     isBuyValid and
-     strategy.opentrades == 0 and
-     (enableDirection == 1 or enableDirection == 0)
-
-strategy.entry(
-     "open_long",
-     strategy.long,
-     when=entry_long
-)
-
-strategy.exit(
-     id="close_long",
-     from_entry="open_long",
-     stop=stopLoss,
-     limit=profitTarget
-)
-
-//---------------------------------------------------------
-// Short Entry
-//---------------------------------------------------------
-
-entryShort =
-     isSellValid and
-     strategy.opentrades == 0 and
-     (enableDirection == -1 or enableDirection == 0)
-
-strategy.entry(
-     "open_short",
-     strategy.short,
-     when=entryShort
-)
-
-strategy.exit(
-     id="close_short",
-     from_entry="open_short",
-     stop=stopLoss,
-     limit=profitTarget
-)
+Doesnt how colors 
