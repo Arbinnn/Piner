@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { loadCandles } from '../lib/csvLoader';
+import { fetchCandles } from '../lib/api';
 import type { Candle } from '../types/candle';
 
 interface UseCandlesResult {
@@ -8,8 +8,8 @@ interface UseCandlesResult {
   error: string | null;
 }
 
-/** Loads and parses the CSV dataset once on mount. */
-export function useCandles(csvUrl: string): UseCandlesResult {
+/** Fetches the symbol's OHLCV from the backend once per symbol/timeframe/window. */
+export function useCandles(symbol: string, timeframe: string, bars?: number): UseCandlesResult {
   const [candles, setCandles] = useState<Candle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +21,7 @@ export function useCandles(csvUrl: string): UseCandlesResult {
       setLoading(true);
       setError(null);
       try {
-        const loaded = await loadCandles(csvUrl);
+        const loaded = await fetchCandles(symbol, timeframe, bars);
         if (cancelled) return;
         setCandles(loaded);
         setLoading(false);
@@ -37,7 +37,7 @@ export function useCandles(csvUrl: string): UseCandlesResult {
     return () => {
       cancelled = true;
     };
-  }, [csvUrl]);
+  }, [symbol, timeframe, bars]);
 
   return { candles, loading, error };
 }

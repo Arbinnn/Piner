@@ -11,13 +11,17 @@
 import { strictEqual, ok } from 'node:assert/strict';
 import { test } from 'node:test';
 import type { UTCTimestamp } from 'lightweight-charts';
-import { compileScript } from '../lib/pineRunner.ts';
-import type { Candle } from '../types/candle.ts';
-import { detectPineScriptType } from './strategyDetector.ts';
-import { executeStrategy } from './strategyExecutor.ts';
-import { periodPerformance } from './metrics.ts';
+import { compileScript } from '../pine/compiler.ts';
+import type { Candle } from '../../src/types/candle.ts';
+import { detectPineScriptType } from '../../src/strategy/strategyDetector.ts';
+import { executeStrategy } from './executor.ts';
+import { periodPerformance } from '../../src/strategy/metrics.ts';
 import { findUnsupportedStrategyCalls } from './unsupported.ts';
-import { DEFAULT_STRATEGY_CONFIG, type StrategyConfig, type StrategyExecutionResult } from './types.ts';
+import {
+  DEFAULT_STRATEGY_CONFIG,
+  type StrategyConfig,
+  type StrategyExecutionResult,
+} from '../../src/strategy/types.ts';
 
 const DAY = 86_400;
 const START = Date.UTC(2020, 0, 1) / 1000;

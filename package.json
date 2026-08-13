@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "server": "node --import ./scripts/register-ts.mjs server/index.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test": "node --import ./scripts/register-ts.mjs --test \"src/**/*.test.ts\"",
+    "test": "node --import ./scripts/register-ts.mjs --test \"src/**/*.test.ts\" \"server/**/*.test.ts\"",
     "preview": "vite preview"
   },
   "dependencies": {

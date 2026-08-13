@@ -12,8 +12,9 @@ import {
   createSeriesMarkers,
   type ISeriesMarkersPluginApi,
 } from 'lightweight-charts';
-import type { CandleSeries, DrawObject, HLine, MarkerSeries, OutputCollector, PlotSeries } from '@heyphat/piner';
+import type { CandleSeries, DrawObject, HLine, MarkerSeries, PlotSeries } from '@heyphat/piner';
 import type { Candle } from '../types/candle';
+import type { PineOutputs } from '../types/pine';
 import { pineColorToRgba } from './color';
 import { DrawingsPrimitive, drawingsPriceExtent, drawingsRightExtent } from './drawings';
 import { FillsPrimitive, resolveFills, type ResolvedFill } from './fills';
@@ -301,7 +302,7 @@ export class PlotRenderer {
 
   /** Applies a fresh run's outputs. Reuses series where possible; drops what's no longer present. */
   render(
-    outputs: OutputCollector,
+    outputs: PineOutputs,
     drawings: readonly DrawObject[],
     candles: readonly Candle[],
     overlay: boolean,
@@ -638,7 +639,7 @@ export class PlotRenderer {
 
   /** `fill()` regions between two plots, painted by a primitive (no native LWC equivalent). */
   private syncFills(
-    outputs: OutputCollector,
+    outputs: PineOutputs,
     candles: readonly Candle[],
     paneIndex: number,
     seen: Set<string>,
@@ -685,7 +686,7 @@ export class PlotRenderer {
 
   /** `bgcolor()` layers, painted as full-height vertical bands behind everything else. */
   private syncBackground(
-    outputs: OutputCollector,
+    outputs: PineOutputs,
     candles: readonly Candle[],
     paneIndex: number,
     seen: Set<string>,

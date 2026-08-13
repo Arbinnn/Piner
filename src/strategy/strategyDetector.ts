@@ -1,4 +1,3 @@
-import { parse, tokenize, type ast, type CompiledScript } from '@heyphat/piner';
 import type { PineScriptType } from './types';
 
 const DECLARATIONS: Record<string, PineScriptType> = {
@@ -8,36 +7,19 @@ const DECLARATIONS: Record<string, PineScriptType> = {
 };
 
 /**
- * Which mode a source is in, WITHOUT compiling it.
+ * Which mode a source is in, from the editor text alone.
  *
- * Parses first — `strategy` appears as `strategy.entry(...)`, inside comments and inside
- * strings in plenty of indicators, so a substring search flips the UI into Strategy Tester
- * mode on scripts that are not strategies. Only a top-level `strategy(...)`/`indicator(...)`
- * CALL counts. A source that does not parse yet (the user is mid-keystroke) falls back to a
- * line-anchored regex so the mode does not flicker on every incomplete edit.
+ * This is a GUESS, used only to decide whether to offer the Strategy Tester tab before the
+ * first Run; `ExecuteResponse.meta.isStrategy` from the backend is the authority afterwards.
  *
- * `compiledScriptType()` is the authority once a compile succeeds.
+ * It used to parse the source with piner to answer exactly, but Pine no longer runs in the
+ * browser at all — so the check is the line-anchored form the parser path already fell back to
+ * while the user was mid-keystroke. A bare substring search would not do: `strategy` appears as
+ * `strategy.entry(...)`, in comments and inside strings in plenty of indicators, and any of
+ * those would flip the UI into the wrong mode. Requiring a line to START with the declaration
+ * call excludes all three.
  */
 export function detectPineScriptType(source: string): PineScriptType {
-  let program: ast.Program;
-  try {
-    program = parse(tokenize(source));
-  } catch {
-    return looseScriptType(source);
-  }
-
-  for (const stmt of program.body) {
-    if (stmt.kind !== 'ExprStmt') continue;
-    const call = stmt.expr;
-    if (call.kind !== 'Call' || call.callee.kind !== 'Ident') continue;
-    const type = DECLARATIONS[call.callee.name];
-    if (type) return type;
-  }
-  return 'unknown';
-}
-
-/** Line-anchored fallback for source that does not parse (comments/strings still excluded). */
-function looseScriptType(source: string): PineScriptType {
   for (const raw of source.split(/\r?\n/)) {
     const line = raw.trim();
     if (line.startsWith('//')) continue;
@@ -45,9 +27,4 @@ function looseScriptType(source: string): PineScriptType {
     if (match) return DECLARATIONS[match[1]];
   }
   return 'unknown';
-}
-
-/** The authoritative answer for a successfully compiled script. */
-export function compiledScriptType(compiled: CompiledScript): PineScriptType {
-  return compiled.metadata.isStrategy ? 'strategy' : 'indicator';
 }

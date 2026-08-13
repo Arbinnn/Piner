@@ -1,21 +1,24 @@
 /**
- * The one place a backtest is executed.
+ * The one place a backtest is executed — now server-side.
  *
  * Deliberately free of React and of lightweight-charts: it takes a compiled script, bars and
- * a config, and returns a plain result object. That keeps the whole thing movable into a Web
- * Worker later (section 29) without touching the UI — the only reason it is not in one today
- * is that a full ADBL run measures in single-digit milliseconds.
+ * a config, and returns a plain result object. That is what makes it movable behind a worker
+ * thread / Piscina / BullMQ later without touching the API or the UI.
+ *
+ * `metrics` and `strategyAdapter` still live under `src/strategy/` because they are pure
+ * functions over the shared result types and the dashboard uses some of them too; the rule
+ * this migration follows is that anything importing the piner ENGINE lives under `server/`.
  */
 
 import type { CompiledScript, DrawObject, OutputCollector, StrategySettings } from '@heyphat/piner';
-import { runScript } from '../lib/pineRunner';
-import { toPinerBars } from '../lib/csvLoader';
-import type { Candle } from '../types/candle';
-import type { InputValues } from '../types/inputs';
-import { computeSummary, equityPhases } from './metrics';
-import { buildEquityCurve, buildOpenPosition, buildPositions, buildTrades } from './strategyAdapter';
-import { describeUnsupported, findUnsupportedStrategyCalls } from './unsupported';
-import type { StrategyConfig, StrategyError, StrategyExecutionResult } from './types';
+import { runScript } from '../pine/runtime.ts';
+import { toPinerBars } from '../candles.ts';
+import type { Candle } from '../../src/types/candle.ts';
+import type { InputValues } from '../../src/types/inputs.ts';
+import { computeSummary, equityPhases } from '../../src/strategy/metrics.ts';
+import { buildEquityCurve, buildOpenPosition, buildPositions, buildTrades } from '../../src/strategy/strategyAdapter.ts';
+import { describeUnsupported, findUnsupportedStrategyCalls } from './unsupported.ts';
+import type { StrategyConfig, StrategyError, StrategyExecutionResult } from '../../src/strategy/types.ts';
 
 export interface ExecuteStrategyArgs {
   compiled: CompiledScript;

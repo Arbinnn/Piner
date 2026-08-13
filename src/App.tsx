@@ -1,9 +1,7 @@
-import { useMemo, useRef, useState } from 'react';
-import csvUrl from './assets/ADBL.csv?url';
+import { useRef, useState } from 'react';
 import { useCandles } from './hooks/useCandles';
 import { useChart } from './hooks/useChart';
 import { usePineScript } from './hooks/usePineScript';
-import { toPinerBars } from './lib/csvLoader';
 import { Toolbar } from './components/Toolbar';
 import { PineEditor } from './components/PineEditor';
 import { Chart } from './components/Chart';
@@ -21,8 +19,7 @@ const TIMEFRAME = 'D';
 type DockTab = 'strategy' | 'console';
 
 function App(): React.JSX.Element {
-  const { candles, loading, error } = useCandles(csvUrl);
-  const bars = useMemo(() => toPinerBars(candles), [candles]);
+  const { candles, loading, error } = useCandles(SYMBOL, TIMEFRAME);
   const { containerRef, chartRef, rendererRef } = useChart(candles);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   /** Which dock tab the user last picked while in strategy mode. */
@@ -33,7 +30,8 @@ function App(): React.JSX.Element {
   const { source, setSource, run, isRunning, inputs, setInputValue, resetInputs, entries, title, scriptType, strategy } =
     usePineScript({
       candles,
-      bars,
+      symbol: SYMBOL,
+      timeframe: TIMEFRAME,
       ready: !loading && candles.length > 0,
       rendererRef,
       chartRef,
@@ -63,7 +61,7 @@ function App(): React.JSX.Element {
         <Splitter targetRef={workspaceRef} />
 
         <div className="workspace__right">
-          {error && <div className="data-error">Failed to load {SYMBOL}.csv: {error}</div>}
+          {error && <div className="data-error">Failed to load {SYMBOL} data: {error}</div>}
           <Chart containerRef={containerRef} />
           <StrategyChartTooltip chartRef={chartRef} markersByTime={strategy.markersByTime} />
         </div>
