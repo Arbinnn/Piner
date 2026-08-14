@@ -58,7 +58,7 @@ function App(): React.JSX.Element {
 
       <div className="workspace" ref={workspaceRef}>
         <div className="workspace__left">
-          <PineEditor value={source} onChange={setSource} onRun={run} />
+          <PineEditor value={source} onChange={setSource} onRun={run} theme={theme} />
           <InputsPanel inputs={inputs} onChange={setInputValue} onReset={resetInputs} />
         </div>
 

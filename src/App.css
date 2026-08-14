@@ -207,25 +207,10 @@
 .pine-editor {
   flex: 1 1 55%;
   min-height: 180px;
-  resize: none;
-  border: none;
-  outline: none;
+  min-width: 0;
+  overflow: hidden;
   background: var(--bg-inset);
-  color: var(--text);
-  font-family: var(--mono);
-  font-size: 13px;
-  line-height: 1.65;
-  padding: 14px 16px;
   border-bottom: 1px solid var(--border);
-  tab-size: 2;
-}
-
-.pine-editor::placeholder {
-  color: var(--text-dim);
-}
-
-.pine-editor:focus-visible {
-  outline: none;
 }
 
 /* Chart */

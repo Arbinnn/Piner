@@ -133,10 +133,72 @@ function rewriteLegacyBuiltins(source: string): string {
   return lines.join('\n');
 }
 
+/**
+ * Renames a user variable named `color`, which this engine cannot tell apart from the `color.*`
+ * namespace: its symbol resolver checks locals before NAMESPACES, so one `color = trend ? a : b`
+ * makes every later `color.new(...)` resolve against the variable and evaluate to `na` — the
+ * script compiles clean and renders with no colours at all. TradingView allows the shadowing
+ * (`color` is a type keyword, not a reserved word) and still routes `color.` to the namespace,
+ * so published scripts use it freely. The replacement is the same length as `color`, leaving
+ * every diagnostic column untouched.
+ */
+function rewriteShadowedColor(source: string): string {
+  let tokens;
+  try {
+    tokens = tokenize(source).tokens;
+  } catch {
+    return source;
+  }
+
+  /** True when the token begins a statement, i.e. is an assignment target rather than an argument name. */
+  const isStatementStart = (i: number): boolean => {
+    const prev = tokens[i - 1];
+    return !prev || String(prev.kind) === 'Newline' || prev.value === 'var' || prev.value === 'varip';
+  };
+
+  const declaresColor = tokens.some(
+    (t, i) =>
+      t.value === 'color' &&
+      isStatementStart(i) &&
+      (tokens[i + 1]?.value === '=' || tokens[i + 1]?.value === ':='),
+  );
+  if (!declaresColor) return source;
+
+  const taken = new Set(tokens.filter((t) => String(t.kind) === 'Ident').map((t) => t.value));
+  let name = '_clr_';
+  for (let n = 1; taken.has(name); n += 1) name = `_clr${n}`;
+
+  const perLine = new Map<number, number[]>();
+  for (let i = 0; i < tokens.length; i += 1) {
+    const t = tokens[i];
+    if (t.value !== 'color') continue;
+    const next = tokens[i + 1];
+    // `color.new(...)` — the namespace, which must keep resolving as one.
+    if (next?.value === '.') continue;
+    // `color c = na` — a type annotation, not a reference to the variable.
+    if (String(next?.kind) === 'Ident') continue;
+    // `plot(x, color = ...)` — a named argument's key, which the callee matches by name.
+    if (next?.value === '=' && !isStatementStart(i)) continue;
+    perLine.set(t.line, [...(perLine.get(t.line) ?? []), t.col]);
+  }
+  if (perLine.size === 0) return source;
+
+  const lines = source.split('\n');
+  for (const [lineNo, cols] of perLine) {
+    let line = lines[lineNo - 1];
+    for (const col of cols) {
+      const idx = col - 1;
+      line = `${line.slice(0, idx)}${name}${line.slice(idx + 'color'.length)}`;
+    }
+    lines[lineNo - 1] = line;
+  }
+  return lines.join('\n');
+}
+
 /** Compiles Pine source. Never throws — all failures are normalized into `error`. */
 export function compileScript(source: string): CompileOutcome {
   try {
-    const patched = rewriteLegacyBuiltins(source);
+    const patched = rewriteShadowedColor(rewriteLegacyBuiltins(source));
     const compiled = compile(patched);
     const overlay = positionalOverlay(source);
     if (overlay !== null) compiled.metadata.overlay = overlay;
