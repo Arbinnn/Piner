@@ -13,6 +13,7 @@ import { executeStrategy } from '../strategy/executor.ts';
 import { compileScript } from './compiler.ts';
 import { runScript } from './runtime.ts';
 import { compileCache, compileKey, resultCache, resultKey } from './cache.ts';
+import { describeUdtHistory, findConditionalUdtHistory } from './udtHistory.ts';
 import { DEFAULT_STRATEGY_CONFIG, type StrategyConfig } from '../../src/strategy/types.ts';
 import type { Candle } from '../../src/types/candle.ts';
 import type { ExecuteRequest, ExecuteResponse, PineError, PineMeta } from '../../src/types/pine.ts';
@@ -180,7 +181,14 @@ export async function executePine(req: ExecuteRequest): Promise<ExecuteResponse>
 
   const compiled = compileCached(req.script);
   const meta = metaOf(compiled);
-  const diagnostics = [...compiled.diagnostics.filter((d) => d.severity !== 'error'), ...securityWarnings(compiled)];
+  const udtReads = findConditionalUdtHistory(req.script);
+  const diagnostics = [
+    ...compiled.diagnostics.filter((d) => d.severity !== 'error'),
+    ...securityWarnings(compiled),
+    ...(udtReads.length > 0
+      ? [{ severity: 'warning' as const, line: udtReads[0].line, col: udtReads[0].col, message: describeUdtHistory(udtReads) }]
+      : []),
+  ];
   const inputs = req.inputs ?? {};
   const startedAt = performance.now();
 
