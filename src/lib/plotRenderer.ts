@@ -95,50 +95,78 @@ function seriesLegendColor(colors: readonly (string | null)[]): string {
   return pineColorToRgba(null);
 }
 
-function plotPoint(plot: PlotSeries, candles: readonly Candle[], i: number, value: number): LineData<Time> {
-  const color = plot.colors[i];
-  return color ? { time: candles[i].time, value, color: pineColorToRgba(color) } : { time: candles[i].time, value };
+/**
+ * Pine's `plot(..., offset = N)`: draw bar `i`'s value at bar `i + N`.
+ *
+ * Backpainting indicators lean on this — a pivot-based script computes a level `length` bars
+ * after the pivot it belongs to, then plots it with `offset = -length` so it lines up with the
+ * pivot. Ignore it and every such line sits `length` bars to the right of the price action it
+ * describes, which is subtly wrong everywhere and obviously wrong at a breakout.
+ */
+function offsetOf(options: Record<string, unknown>): number {
+  return Math.trunc(asNumber(options.offset, 0));
 }
 
 /**
- * Splits a plot into the contiguous runs of real values that a `*br` style must draw as
- * SEPARATE lines, so `na` shows as a genuine gap.
+ * Splits a plot into the runs of consecutive bars that are actually drawn.
  *
- * A whitespace point does not do this. lightweight-charts drops whitespace before it reaches
- * the series (`seriesRows.filter(isSeriesPlotRow)`) — it only widens the time scale — and the
- * line renderer then walks whatever points remain and joins them, drawing a long diagonal
- * straight across the gap. One series per run is what actually breaks the line.
+ * Two things cut a run, and both are invisible in the data alone:
  *
- * ponytail: one LWC series per run. Fine at the tens-of-flips a regime indicator produces;
- * a plot that alternated na every other bar over thousands of bars would want a single
+ *  - **`color = na` on a bar.** Pine paints nothing there, so the line BREAKS. This is how a
+ *    trendline indicator hides the jump when its level resets: `color = ph ? na : upCss` blanks
+ *    the single bar where `upper := ph` snaps to a new pivot. Drawn as one connected series
+ *    instead, that reset becomes a vertical drop and a run of separate rays reads as a sawtooth.
+ *    A plot with NO colour argument reports an empty `colors` array (not nulls), so "no per-bar
+ *    colour" and "explicitly `na`" stay distinguishable — only the latter breaks.
+ *  - **A non-finite value**, but only for the `*br` styles. That is the sole thing separating
+ *    `plot.style_linebr` from `plot.style_line`: scripts plot one series per regime, each `na`
+ *    where the other is live, and joining those gaps runs both lines the full width of the
+ *    chart instead of handing off.
+ *
+ * A whitespace point does neither. lightweight-charts drops whitespace before it reaches the
+ * series (`seriesRows.filter(isSeriesPlotRow)`) — it only widens the time scale — and the line
+ * renderer then joins whatever points remain, drawing straight across the gap. One series per
+ * run is what actually breaks a line.
+ *
+ * ponytail: one LWC series per run. Fine at the tens of flips a regime or trendline indicator
+ * produces; a plot alternating every other bar over thousands of bars would want a single
  * canvas primitive stroking the runs instead.
  */
-function splitPlotRuns(plot: PlotSeries, candles: readonly Candle[]): LineData<Time>[][] {
+export function plotRuns(plot: PlotSeries, candles: readonly Candle[], breakOnNaValue: boolean): LineData<Time>[][] {
+  const offset = offsetOf(plot.options);
+  const perBarColors = plot.colors.length > 0;
   const runs: LineData<Time>[][] = [];
   let current: LineData<Time>[] = [];
 
-  for (let i = 0; i < plot.data.length && i < candles.length; i += 1) {
-    const value = plot.data[i];
-    if (!Number.isFinite(value)) {
-      if (current.length > 0) runs.push(current);
-      current = [];
+  const cut = (): void => {
+    if (current.length > 0) runs.push(current);
+    current = [];
+  };
+
+  for (let i = 0; i < plot.data.length; i += 1) {
+    const at = i + offset;
+    if (at < 0 || at >= candles.length) {
+      cut();
       continue;
     }
-    current.push(plotPoint(plot, candles, i, value));
-  }
-  if (current.length > 0) runs.push(current);
-  return runs;
-}
 
-/** Every real value as one continuous line: `na` is skipped and the gap joins, which is what
- *  the non-`br` Pine styles mean. */
-function plotToLineData(plot: PlotSeries, candles: readonly Candle[]): LineData<Time>[] {
-  const points: LineData<Time>[] = [];
-  for (let i = 0; i < plot.data.length && i < candles.length; i += 1) {
+    const color = perBarColors ? plot.colors[i] : undefined;
+    if (color === null) {
+      cut();
+      continue;
+    }
+
     const value = plot.data[i];
-    if (Number.isFinite(value)) points.push(plotPoint(plot, candles, i, value));
+    if (!Number.isFinite(value)) {
+      if (breakOnNaValue) cut();
+      continue;
+    }
+
+    const time = candles[at].time;
+    current.push(color ? { time, value, color: pineColorToRgba(color) } : { time, value });
   }
-  return points;
+  cut();
+  return runs;
 }
 
 function candlesToWhitespace(candles: readonly Candle[]): WhitespaceData<Time>[] {
@@ -426,9 +454,9 @@ export class PlotRenderer {
       const plotPane = plotPanes.get(id) ?? paneIndex;
       if (plotPane !== OVERLAY_PANE) usedSeparatePane = true;
       const style = typeof plot.options.style === 'string' ? plot.options.style : '';
-      // A `*br` plot becomes one series per unbroken run; everything else stays a single
-      // series whose `na` gaps are joined, which is what the non-`br` styles mean.
-      const runs = BREAK_ON_NA_STYLES.has(style) ? splitPlotRuns(plot, candles) : [plotToLineData(plot, candles)];
+      // One series per drawn run: a `*br` plot breaks on `na` values, every plot breaks where
+      // the script painted `color = na`, and `offset =` shifts each point along the time axis.
+      const runs = plotRuns(plot, candles, BREAK_ON_NA_STYLES.has(style));
       const visible = isVisible(plot.options);
 
       runs.forEach((points, run) => {
@@ -450,7 +478,11 @@ export class PlotRenderer {
           lineWidth: asLineWidth(plot.options.linewidth),
           lineType: lineTypeFor(plot.options),
           visible: visible && this.plotsVisible,
+          // One price label and ONE price line for the whole plot, not one per run. Both
+          // default to on per series, so a plot that breaks into 67 rays would otherwise
+          // stripe the chart with 67 dotted horizontals at 67 different last values.
           lastValueVisible: run === runs.length - 1,
+          priceLineVisible: run === runs.length - 1,
         });
         api.setData(points);
         this.tracked.set(key, { kind: 'plot', paneIndex: plotPane, api, visible, hasData: points.length > 0 });

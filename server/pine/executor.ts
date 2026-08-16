@@ -77,14 +77,23 @@ function compileCached(source: string): CompiledScript {
 /**
  * Warns about `request.security*` data this host cannot supply.
  *
- * piner implements the calls but never fetches: the host is expected to read the compiled
- * script's dependencies, fetch those bars and inject them under `securityBars`. This service
- * injects nothing, so every such call returns an empty array — and, exactly as with an unknown
- * `strategy.*` member, that is NOT an error. The script runs clean and the whole branch behind
- * `arr.size() > 0` is quietly skipped, so a script renders half its output with no explanation.
- * LuxAlgo's Delta ZigZag draws its lines and silently drops every volume-delta label this way.
+ * Three distinct failures, verified against the installed engine rather than assumed:
  *
- * A warning rather than a refusal: unlike a strategy, whose numbers would be wrong, a partial
+ *  - `request.security_lower_tf` — piner implements it but never fetches; the host is expected
+ *    to inject the intrabar bars under `securityBars`. This service serves one timeframe per
+ *    symbol and has none to give, so the call returns an empty array. Exactly as with an
+ *    unknown `strategy.*` member, that is NOT an error: the script runs clean and every branch
+ *    behind `arr.size() > 0` is quietly skipped. LuxAlgo's Delta ZigZag draws all its lines and
+ *    silently drops every volume-delta label this way.
+ *  - Cross-symbol `request.security` — same story, and equally unfixable here: one symbol is
+ *    loaded per run.
+ *  - Same-symbol `request.security` — this one WORKS, including higher-timeframe resampling,
+ *    but only for builtin series. An expression reading a user-defined global is captured on
+ *    the first bar and frozen (`src = close` / `request.security(tickerid, tf, f(src))` plots a
+ *    flat line at bar 0's close). An engine defect, not a host gap, so all this can do is name
+ *    it and point at the workaround. LuxAlgo's Predictive Ranges collapses to one flat level.
+ *
+ * Warnings rather than refusals: unlike a strategy, whose numbers would be wrong, a partial
  * indicator is still worth looking at — the user just has to know it is partial.
  */
 function securityWarnings(compiled: CompiledScript): Diagnostics {
@@ -92,7 +101,8 @@ function securityWarnings(compiled: CompiledScript): Diagnostics {
   if (deps.length === 0) return [];
 
   const lowerTf = deps.some((d) => d.lowerTf);
-  const higherTf = deps.some((d) => !d.lowerTf);
+  const crossSymbol = deps.some((d) => !d.lowerTf && d.self === false);
+  const selfSymbol = deps.some((d) => !d.lowerTf && d.self !== false);
   const out: Diagnostics = [];
 
   if (lowerTf) {
@@ -106,15 +116,28 @@ function securityWarnings(compiled: CompiledScript): Diagnostics {
         'return empty. Any output gated on them (labels, volume-delta readouts) will be missing.',
     });
   }
-  if (higherTf) {
+  if (crossSymbol) {
     out.push({
       severity: 'warning',
       line: 0,
       col: 0,
       message:
-        'This script calls request.security() for another symbol or timeframe. This service does ' +
-        'not fetch or inject that data, so those calls return na and anything derived from them ' +
-        'will be missing.',
+        'This script calls request.security() for a DIFFERENT symbol. This service loads one ' +
+        'symbol per run and does not fetch or inject the other one, so those calls return na and ' +
+        'anything derived from them will be missing.',
+    });
+  }
+  if (selfSymbol) {
+    out.push({
+      severity: 'warning',
+      line: 0,
+      col: 0,
+      message:
+        'This script wraps its calculation in request.security() on its own symbol. That works ' +
+        'for builtin series (close, ta.atr(...)), but an expression that reads a USER-DEFINED ' +
+        'variable is captured on the first bar and never updates — plots come out as one flat ' +
+        'line. If that is what you see, call the function directly instead: with an empty ' +
+        'timeframe the request.security() wrapper is a no-op anyway.',
     });
   }
   return out;
