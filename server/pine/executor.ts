@@ -74,6 +74,52 @@ function compileCached(source: string): CompiledScript {
   return outcome.compiled;
 }
 
+/**
+ * Warns about `request.security*` data this host cannot supply.
+ *
+ * piner implements the calls but never fetches: the host is expected to read the compiled
+ * script's dependencies, fetch those bars and inject them under `securityBars`. This service
+ * injects nothing, so every such call returns an empty array — and, exactly as with an unknown
+ * `strategy.*` member, that is NOT an error. The script runs clean and the whole branch behind
+ * `arr.size() > 0` is quietly skipped, so a script renders half its output with no explanation.
+ * LuxAlgo's Delta ZigZag draws its lines and silently drops every volume-delta label this way.
+ *
+ * A warning rather than a refusal: unlike a strategy, whose numbers would be wrong, a partial
+ * indicator is still worth looking at — the user just has to know it is partial.
+ */
+function securityWarnings(compiled: CompiledScript): Diagnostics {
+  const deps = compiled.metadata.securityDependencies ?? [];
+  if (deps.length === 0) return [];
+
+  const lowerTf = deps.some((d) => d.lowerTf);
+  const higherTf = deps.some((d) => !d.lowerTf);
+  const out: Diagnostics = [];
+
+  if (lowerTf) {
+    out.push({
+      severity: 'warning',
+      line: 0,
+      col: 0,
+      message:
+        'This script calls request.security_lower_tf() for intrabar data. This service serves a ' +
+        'single timeframe per symbol and has no lower-timeframe bars to supply, so those calls ' +
+        'return empty. Any output gated on them (labels, volume-delta readouts) will be missing.',
+    });
+  }
+  if (higherTf) {
+    out.push({
+      severity: 'warning',
+      line: 0,
+      col: 0,
+      message:
+        'This script calls request.security() for another symbol or timeframe. This service does ' +
+        'not fetch or inject that data, so those calls return na and anything derived from them ' +
+        'will be missing.',
+    });
+  }
+  return out;
+}
+
 function metaOf(compiled: CompiledScript): PineMeta {
   return {
     title: compiled.metadata.title,
@@ -111,7 +157,7 @@ export async function executePine(req: ExecuteRequest): Promise<ExecuteResponse>
 
   const compiled = compileCached(req.script);
   const meta = metaOf(compiled);
-  const diagnostics = compiled.diagnostics.filter((d) => d.severity !== 'error');
+  const diagnostics = [...compiled.diagnostics.filter((d) => d.severity !== 'error'), ...securityWarnings(compiled)];
   const inputs = req.inputs ?? {};
   const startedAt = performance.now();
 

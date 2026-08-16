@@ -214,7 +214,12 @@ export function usePineScript({
       setIsRunning(false);
 
       for (const diag of response.diagnostics) {
-        if (diag.severity === 'warning') log('warning', 'Compilation Warning', diag.message, diag.line, diag.col);
+        // A diagnostic with no source position (line 0) is about the run as a whole, not a
+        // token — printing "0:0" in front of it just looks like a bug.
+        if (diag.severity === 'warning') {
+          const positioned = diag.line > 0;
+          log('warning', 'Compilation Warning', diag.message, positioned ? diag.line : undefined, positioned ? diag.col : undefined);
+        }
       }
 
       const { meta } = response;
