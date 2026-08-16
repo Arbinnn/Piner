@@ -240,6 +240,8 @@ interface TrackedPlot {
   api: ISeriesApi<'Line'>;
   /** `plot(..., display=display.none)` hides the series — and with it anything attached to it. */
   visible: boolean;
+  /** Whether the series holds any real point. An empty one cannot host (see `paneHostFor`). */
+  hasData: boolean;
 }
 interface TrackedHline {
   kind: 'hline';
@@ -451,7 +453,7 @@ export class PlotRenderer {
           lastValueVisible: run === runs.length - 1,
         });
         api.setData(points);
-        this.tracked.set(key, { kind: 'plot', paneIndex: plotPane, api, visible });
+        this.tracked.set(key, { kind: 'plot', paneIndex: plotPane, api, visible, hasData: points.length > 0 });
       });
     }
     // Only grow the lower pane if something actually landed there — a script whose every plot
@@ -462,7 +464,7 @@ export class PlotRenderer {
   private recreatePlotSeries(key: string, existing: Tracked | undefined, paneIndex: number): ISeriesApi<'Line'> {
     if (existing?.kind === 'plot') this.chart.removeSeries(existing.api);
     const api = this.chart.addSeries(LineSeries, {}, paneIndex);
-    this.tracked.set(key, { kind: 'plot', paneIndex, api, visible: true });
+    this.tracked.set(key, { kind: 'plot', paneIndex, api, visible: true, hasData: false });
     return api;
   }
 
@@ -521,6 +523,10 @@ export class PlotRenderer {
    * fails to place). A hidden plot is skipped: lightweight-charts suppresses price lines and
    * primitives attached to an invisible series along with the series itself.
    *
+   * An EMPTY plot is skipped for the same reason a whitespace one is. A script that gates its
+   * only plot behind an input — `plot(show ? value : na)` — leaves a visible series with zero
+   * points, which joins no price scale; hosting on it silently kills every drawing on the pane.
+   *
    * When the pane has no plot at all — a gauge drawn purely from polylines, say — the host is
    * seeded with REAL values spanning `hostExtent` rather than whitespace, and reports that
    * range through `autoscaleInfoProvider`. Whitespace alone leaves the pane without a price
@@ -530,7 +536,7 @@ export class PlotRenderer {
     if (paneIndex === OVERLAY_PANE) return this.candleSeries;
 
     for (const entry of this.tracked.values()) {
-      if (entry.kind === 'plot' && entry.paneIndex === paneIndex && entry.visible) return entry.api;
+      if (entry.kind === 'plot' && entry.paneIndex === paneIndex && entry.visible && entry.hasData) return entry.api;
     }
 
     const key = `panehost:${paneIndex}`;

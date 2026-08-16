@@ -1,108 +1,90 @@
-// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
-// ©ChartPrime
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/
 
-//@version=5
-indicator("Radius Trend [ChartPrime]", overlay = true)
+//@version = 4
+//Copyright LuxAlgo
+study("Volume Profile [LUX]","Volume Profile [LuxAlgo]",true,max_bars_back=1000,max_lines_count=500)
+length    = input(500,'Lookback',minval=1,maxval=1000,group='Basic'
+  ,tooltip='Number of most recent bars to use for the calculation of the volume profile')
+row       = input(200,'Row Size',minval=1,maxval=500,group='Basic'
+  ,tooltip='Determines the number of rows used for the calculation of the volume profile')
+show_rpoc = input(false,'Show Rolling POC',group='Basic'
+  ,tooltip='Determines whether to display the rolling POC of the volume profile')
 
-// --------------------------------------------------------------------------------------------------------------------
-// 𝙐𝙎𝙀𝙍 𝙄𝙉𝙋𝙐𝙏𝙎
-// --------------------------------------------------------------------------------------------------------------------
+width     = input(50,'Width (% of the box)',minval=1,maxval=100,group='Style'
+  ,tooltip='Determines the length of the bars relative to the Lookback value')
+bar_width = input(2,'Bar Width',group='Style'
+  ,tooltip='Width of each bar')
+flip      = input(false,'Flip Histogram',group='Style'
+  ,tooltip='Flip the histogram, when enabled, the histogram base will be located at the most recent candle')
+grad      = input(true,'Gradient',group='Style'
+  ,tooltip='Allows to color the volume profile bars with a gradient, with a color intensity determined by the length of each bar')
+solid     = input(#2157f3,'Rows Solid Color',group='Style'
+  ,tooltip='Color of each bar when "Gradient" is disabled')
+poc_color = input(#ff5d00,'POC Solid Color',group='Style'
+  ,tooltip='Color of the POC when "Gradient" is disabled')
+//-----------------------------------------------------------------------------------------
+var vol_css = array.new_color(na)
+var a = array.new_line()
+var b = array.new_line()
 
-// @variable Step size for radius adjustment
-float step = input.float(0.15, "Radius Step", step = 0.001)
-
-// @variable Multiplier for initial distance calculation
-float multi = input.float(2, "Start Points Distance", step = 0.1)
-
-// Initialize variables
-bool trend = na
-var float multi1 = 0.
-var float multi2 = 0.
-int n = 3
-var float band = 0.
-
-// --------------------------------------------------------------------------------------------------------------------
-// 𝙄𝙉𝘿𝙄𝘾𝘼𝙏𝙊𝙍 𝘾𝘼𝙇𝘾𝙐𝙇𝘼𝙏𝙄𝙊𝙉𝙎
-// --------------------------------------------------------------------------------------------------------------------
-
-// Calculate distances for band placement
-float distance = ta.sma(math.abs(high - low), 100) * multi
-float distance1 = ta.sma(math.abs(high - low), 100) * 0.2
-
-// Initialize trend and band on the 101st bar
-if bar_index == 101
-    trend := true
-    band := low * 0.8
-
-// Update trend based on price relation to band
-if close < band
-    trend := false
-
-if close > band
-    trend := true
-
-// Calculate trend change ONCE.
-// This avoids calling stateful ta.change() inside conditional branches.
-trend_change = ta.change(trend)
-
-// Adjust band on trend changes
-if trend[1] == false and trend_change
-    band := low - distance
-
-if trend[1] == true and trend_change
-    band := high + distance
-
-// Apply step angle to trend lines
-if bar_index % n == 0 and trend
-    multi1 := 0
-    multi2 += step
-    band += distance1 * multi2
-
-if bar_index % n == 0 and not trend
-    multi1 += step
-    multi2 := 0
-    band -= distance1 * multi1
-
-// Smooth the band
-Sband = ta.sma(band, n)
-
-// Set color based on trend
-color = trend ? #54b6d4 : #cf2b2b
-
-// Calculate upper and lower bands
-band_upper = ta.sma(band + distance * 0.5, n)
-band_lower = ta.sma(band - distance * 0.5, n)
-band1 = trend ? band_upper : band_lower
-
-// --------------------------------------------------------------------------------------------------------------------
-// 𝙑𝙄𝙎𝙐𝘼𝙇𝙄𝙕𝘼𝙏𝙄𝙊𝙉
-// --------------------------------------------------------------------------------------------------------------------
-
-// Plot the outer band
-plot(
-     band1,
-     color = bar_index % 2 == 0 ? color.new(chart.fg_color, 50) : na
-     )
-
-// Plot the main band and fill area
-p1 = plot(
-     trend_change ? na : Sband,
-     style = plot.style_linebr,
-     color = color.gray
-     )
-
-p2 = plot(
-     ta.sma(hl2, 20),
-     display = display.none
-     )
-
-fill(
-     p1,
-     p2,
-     band,
-     ta.sma(hl2, 20),
-     color.new(color, 60),
-     na
-     )
-
-// --------------------------------------------------------------------------------------------------------------------
+if barstate.isfirst
+    array.push(vol_css,#1E152A), array.push(vol_css,#1E162B), array.push(vol_css,#1F182C), array.push(vol_css,#1F192E), array.push(vol_css,#201B2F), array.push(vol_css,#211C31), array.push(vol_css,#211E32), array.push(vol_css,#222034), array.push(vol_css,#222135), array.push(vol_css,#232337), array.push(vol_css,#242438), array.push(vol_css,#24263A), array.push(vol_css,#25273B), array.push(vol_css,#25293D), array.push(vol_css,#262B3E), array.push(vol_css,#272C3F), array.push(vol_css,#272E41), array.push(vol_css,#282F42), array.push(vol_css,#283144), array.push(vol_css,#293245), array.push(vol_css,#2A3447), array.push(vol_css,#2A3648), array.push(vol_css,#2B374A), array.push(vol_css,#2B394B), array.push(vol_css,#2C3A4D), array.push(vol_css,#2D3C4E), array.push(vol_css,#2D3D50), array.push(vol_css,#2E3F51), array.push(vol_css,#2E4153), array.push(vol_css,#2F4254), array.push(vol_css,#304455), array.push(vol_css,#304557), array.push(vol_css,#314758), array.push(vol_css,#32495A), array.push(vol_css,#324A5B), array.push(vol_css,#334C5D), array.push(vol_css,#334D5E), array.push(vol_css,#344F60), array.push(vol_css,#355061), array.push(vol_css,#355263), array.push(vol_css,#365464), array.push(vol_css,#365566), array.push(vol_css,#375767), array.push(vol_css,#385868), array.push(vol_css,#385A6A), array.push(vol_css,#395B6B), array.push(vol_css,#395D6D), array.push(vol_css,#3A5F6E), array.push(vol_css,#3B6070), array.push(vol_css,#3B6271), array.push(vol_css,#3C6373), array.push(vol_css,#3C6574), array.push(vol_css,#3D6676), array.push(vol_css,#3E6877), array.push(vol_css,#3E6A79), array.push(vol_css,#3F6B7A), array.push(vol_css,#3F6D7C), array.push(vol_css,#406E7D), array.push(vol_css,#41707E), array.push(vol_css,#417180), array.push(vol_css,#427381), array.push(vol_css,#427583), array.push(vol_css,#437684), array.push(vol_css,#447886), array.push(vol_css,#447987), array.push(vol_css,#457B89), array.push(vol_css,#467D8A), array.push(vol_css,#467E8C), array.push(vol_css,#47808D), array.push(vol_css,#47818F), array.push(vol_css,#488390), array.push(vol_css,#498491), array.push(vol_css,#498693), array.push(vol_css,#4A8894), array.push(vol_css,#4A8996), array.push(vol_css,#4B8B97), array.push(vol_css,#4C8C99), array.push(vol_css,#4C8E9A), array.push(vol_css,#4D8F9C), array.push(vol_css,#4D919D), array.push(vol_css,#4E939F), array.push(vol_css,#4F94A0), array.push(vol_css,#4F96A2), array.push(vol_css,#5097A3), array.push(vol_css,#5099A5), array.push(vol_css,#519AA6), array.push(vol_css,#529CA7), array.push(vol_css,#529EA9), array.push(vol_css,#539FAA), array.push(vol_css,#53A1AC), array.push(vol_css,#54A2AD), array.push(vol_css,#55A4AF), array.push(vol_css,#55A5B0), array.push(vol_css,#56A7B2), array.push(vol_css,#56A9B3), array.push(vol_css,#57AAB5), array.push(vol_css,#58ACB6), array.push(vol_css,#58ADB8), array.push(vol_css,#59AFB9), array.push(vol_css,#5AB1BB)
+    for i = 0 to row-1
+        array.push(a,line.new(na,na,na,na,width=2))
+    array.push(b,line.new(na,na,na,na,width=2))
+//-----------------------------------------------------------------------------------------
+n = bar_index
+src = close
+v = volume
+//-----------------------------------------------------------------------------------------
+var Alvl = 0.
+var Blvl = 0.
+var current_num_conf = 0
+var current_num_cont = 0
+highest = highest(length)
+lowest = lowest(length)
+//----
+line l = na
+line poc = na
+levels = array.new_float(0)
+sumv = array.new_float(0)
+//----
+condition = show_rpoc ? true : barstate.islast
+if condition
+    for i = 0 to row
+        array.push(levels,lowest + i/row*(highest-lowest))
+    for j = 0 to row-1
+        sum = 0.
+        for k = 0 to length-1
+            sum := high[k] > array.get(levels,j) and low[k] < array.get(levels,j+1) ?
+              sum + v[k] : sum
+        array.push(sumv,sum)
+    for j = 0 to row-1
+        mult = array.get(sumv,j)/array.max(sumv)
+        l := array.get(a,j)
+        get = array.get(levels,j)
+        if flip
+            line.set_xy1(l,n,get)
+            line.set_xy2(l,n-round(length*width/100*mult),array.get(levels,j))
+        else
+            line.set_xy1(l,n-length+1,get)
+            line.set_xy2(l,n-length+round(length*width/100*mult),array.get(levels,j))
+        line.set_color(l,grad ? array.get(vol_css,round(mult*99)) : solid)
+        line.set_width(l,bar_width)
+        if mult == 1
+            poc := array.get(b,0)
+            avg = avg(get,array.get(levels,j+1))
+            if flip
+                line.set_xy1(poc,n,avg)
+                line.set_xy2(poc,n-length+1,avg)
+            else
+                line.set_xy1(poc,n-length+1,avg)
+                line.set_xy2(poc,n,avg)
+            line.set_color(poc,grad ? #5AB1BB : poc_color)
+            line.set_style(poc,line.style_dotted)
+            line.set_width(poc,bar_width)
+    if show_rpoc
+        Alvl := array.get(levels,array.indexof(sumv,array.max(sumv)))
+        Blvl := array.get(levels,array.indexof(sumv,array.max(sumv))+1)
+plot(show_rpoc ? avg(Alvl,Blvl) : na,'Rolling POC',color=#ff1100) 
+//----------------------------------------------------------------------------------------]

@@ -134,6 +134,44 @@ function rewriteLegacyBuiltins(source: string): string {
 }
 
 /**
+ * Rewrites the Pine v3/v4 `study(...)` declaration to `indicator(...)`.
+ *
+ * The engine only recognizes `indicator`/`strategy`, and an unrecognized declaration is not an
+ * error — the call simply does nothing. Every header field is then lost at once: the title is
+ * `""`, `overlay` defaults to false (so an overlay script lands on a separate pane), and
+ * `max_lines_count` / `max_labels_count` / `max_boxes_count` fall back to Pine's default of 50.
+ * LuxAlgo's Volume Profile declares `max_lines_count=500` and draws 201 lines; unrewritten it
+ * produced 50, on the wrong pane, with no title.
+ *
+ * The two declarations share their first three positional parameters (title, shorttitle,
+ * overlay), so the swap is safe. `indicator` is four characters longer, so diagnostics on the
+ * declaration line report columns shifted by four — the only place in this file where a rewrite
+ * does not preserve them, and worth it for a header that would otherwise be discarded entirely.
+ */
+function rewriteStudyToIndicator(source: string): string {
+  let tokens;
+  try {
+    tokens = tokenize(source).tokens;
+  } catch {
+    return source;
+  }
+
+  for (let i = 0; i < tokens.length; i += 1) {
+    const t = tokens[i];
+    if (String(t.kind) !== 'Ident' || t.value !== 'study') continue;
+    // A member access (`foo.study`) or a bare reference is not the declaration.
+    if (tokens[i - 1]?.value === '.' || tokens[i + 1]?.value !== '(') continue;
+
+    const lines = source.split('\n');
+    const idx = t.col - 1;
+    const line = lines[t.line - 1];
+    lines[t.line - 1] = `${line.slice(0, idx)}indicator${line.slice(idx + 'study'.length)}`;
+    return lines.join('\n');
+  }
+  return source;
+}
+
+/**
  * Renames a user variable named `color`, which this engine cannot tell apart from the `color.*`
  * namespace: its symbol resolver checks locals before NAMESPACES, so one `color = trend ? a : b`
  * makes every later `color.new(...)` resolve against the variable and evaluate to `na` — the
@@ -198,9 +236,11 @@ function rewriteShadowedColor(source: string): string {
 /** Compiles Pine source. Never throws — all failures are normalized into `error`. */
 export function compileScript(source: string): CompileOutcome {
   try {
-    const patched = rewriteShadowedColor(rewriteLegacyBuiltins(source));
+    const patched = rewriteShadowedColor(rewriteLegacyBuiltins(rewriteStudyToIndicator(source)));
     const compiled = compile(patched);
-    const overlay = positionalOverlay(source);
+    // Read from the patched source: a `study(...)` declaration is only a recognizable
+    // declaration after the rewrite above.
+    const overlay = positionalOverlay(patched);
     if (overlay !== null) compiled.metadata.overlay = overlay;
     const hasError = compiled.diagnostics.some((d) => d.severity === 'error');
     if (hasError) {
