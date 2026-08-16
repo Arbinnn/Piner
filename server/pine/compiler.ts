@@ -18,6 +18,7 @@ import {
   type Diagnostic,
 } from '@heyphat/piner';
 import type { PineError } from '../../src/types/pine.ts';
+import { rewriteConditionalUdtHistory } from './udtHistory.ts';
 
 export interface CompileOutcome {
   compiled: CompiledScript | null;
@@ -236,7 +237,9 @@ function rewriteShadowedColor(source: string): string {
 /** Compiles Pine source. Never throws — all failures are normalized into `error`. */
 export function compileScript(source: string): CompileOutcome {
   try {
-    const patched = rewriteShadowedColor(rewriteLegacyBuiltins(rewriteStudyToIndicator(source)));
+    const patched = rewriteConditionalUdtHistory(
+      rewriteShadowedColor(rewriteLegacyBuiltins(rewriteStudyToIndicator(source))),
+    ).source;
     const compiled = compile(patched);
     // Read from the patched source: a `study(...)` declaration is only a recognizable
     // declaration after the rewrite above.
