@@ -38,6 +38,77 @@ function isNa(value: unknown): boolean {
   return typeof value === 'object' && value !== null && (value as { __na?: unknown }).__na === true;
 }
 
+/** Shared empty lookup, so a frame with no linefill allocates nothing. */
+const EMPTY_LINES: ReadonlyMap<number, Record<string, unknown>> = new Map();
+
+/**
+ * A line's two on-screen endpoints, with `extend` already applied. Deliberately says nothing
+ * about colour: a `linefill` still paints between two lines whose own colour is `na`, which is
+ * how a script offers "show the band but not its edges" as a setting.
+ */
+function lineEndpoints(
+  props: Record<string, unknown>,
+  geometry: Geometry,
+): { ax: number; ay: number; bx: number; by: number } | null {
+  const xloc = str(props.xloc, 'bar_index');
+  const extend = str(props.extend, 'none');
+  const x1 = geometry.x(props.x1, xloc);
+  const x2 = geometry.x(props.x2, xloc);
+  const y1 = geometry.y(props.y1);
+  const y2 = geometry.y(props.y2);
+  if (x1 === null || x2 === null || y1 === null || y2 === null) return null;
+
+  let [ax, ay, bx, by] = [x1, y1, x2, y2];
+  const dx = x2 - x1;
+  // A near-zero dx is a vertical line; extending it horizontally is meaningless, and the
+  // slope would blow up. Pine's own hlines arrive as x2 = x1 + 1ms, so this matters.
+  if (Math.abs(dx) > 1e-6) {
+    const slope = (y2 - y1) / dx;
+    if (extend === 'right' || extend === 'both') {
+      bx = geometry.width;
+      by = y1 + slope * (bx - x1);
+    }
+    if (extend === 'left' || extend === 'both') {
+      ax = 0;
+      ay = y1 + slope * (ax - x1);
+    }
+  }
+  return { ax, ay, bx, by };
+}
+
+/**
+ * `linefill.new(line1, line2, color)` — the band between two lines, as canvas points.
+ *
+ * The fill references its lines by id and carries no coordinates of its own, so it is resolved
+ * against the line objects in the same frame. Scripts use it for range/channel shading:
+ * LuxAlgo's Range Sentiment Profile expresses its whole bull/bear bias as one linefill over the
+ * range's top and bottom lines, and undrawn the chart shows the levels with no band at all.
+ *
+ * ponytail: the quad through both lines' endpoints, exact whenever the two lines span the same
+ * x range — what every channel script produces. Two lines with disjoint spans would need their
+ * overlap clipped first.
+ */
+export function linefillPolygon(
+  props: Record<string, unknown>,
+  lines: ReadonlyMap<number, Record<string, unknown>>,
+  geometry: Geometry,
+): [number, number][] | null {
+  const first = lines.get(num(props.line1) ?? NaN);
+  const second = lines.get(num(props.line2) ?? NaN);
+  if (!first || !second) return null;
+
+  const a = lineEndpoints(first, geometry);
+  const b = lineEndpoints(second, geometry);
+  if (!a || !b) return null;
+
+  return [
+    [a.ax, a.ay],
+    [a.bx, a.by],
+    [b.bx, b.by],
+    [b.ax, b.ay],
+  ];
+}
+
 /** Below these box dimensions text is unreadable, so it is dropped rather than smeared. */
 const MIN_TEXT_HEIGHT = 8;
 const MIN_TEXT_WIDTH = 10;
@@ -114,8 +185,6 @@ interface Geometry {
  * `plot()` calls are `display.none` and intentionally invisible. Without this the chart looks
  * empty even though the script ran correctly.
  *
- * Not yet drawn: `linefill`. It is one more `case` in `drawOne` plus its coordinate
- * handling; nothing else has to change.
  */
 export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
   private drawings: readonly DrawObject[] = [];
@@ -127,6 +196,9 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
   // Stable view instances: the library caches on array identity, so these are created once.
   // Tables sit on 'top' — they are screen-anchored chrome and must float over everything.
   private readonly views: readonly IPrimitivePaneView[] = [
+    // Linefills first: they are the backdrop for the very lines that define them, so they must
+    // not paint over a box or a line that happens to have been created earlier.
+    this.makeView('bottom', (d) => d.type === 'linefill'),
     this.makeView('bottom', (d) => d.type === 'box'),
     this.makeView('normal', (d) => d.type === 'line' || d.type === 'label' || d.type === 'polyline'),
     this.makeView('top', (d) => d.type === 'table'),
@@ -186,26 +258,45 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
         width: scope.mediaSize.width,
       };
 
+      // A linefill carries only the ids of the two lines it spans, so those have to be resolved
+      // against the whole frame — not just the items in this view, which never include lines.
+      const lines = items.some((d) => d.type === 'linefill') ? this.lineIndex() : EMPTY_LINES;
+
       const ctx = scope.context;
       for (const item of items) {
         ctx.save();
         if (item.type === 'table') {
           drawTable(ctx, item.props, scope.mediaSize.width, scope.mediaSize.height);
         } else {
-          this.drawOne(ctx, item, geometry);
+          this.drawOne(ctx, item, geometry, lines);
         }
         ctx.restore();
       }
     });
   }
 
-  private drawOne(ctx: CanvasRenderingContext2D, item: DrawObject, geometry: Geometry): void {
+  /** `line.new` objects by id, for the linefills that reference them. */
+  private lineIndex(): ReadonlyMap<number, Record<string, unknown>> {
+    const lines = new Map<number, Record<string, unknown>>();
+    for (const d of this.drawings) if (d.type === 'line') lines.set(d.id, d.props);
+    return lines;
+  }
+
+  private drawOne(
+    ctx: CanvasRenderingContext2D,
+    item: DrawObject,
+    geometry: Geometry,
+    lines: ReadonlyMap<number, Record<string, unknown>>,
+  ): void {
     switch (item.type) {
       case 'box':
         this.drawBox(ctx, item.props, geometry);
         break;
       case 'line':
         this.drawLine(ctx, item.props, geometry);
+        break;
+      case 'linefill':
+        this.drawLinefill(ctx, item.props, geometry, lines);
         break;
       case 'label':
         this.drawLabel(ctx, item.props, geometry);
@@ -295,32 +386,29 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     ctx.restore();
   }
 
+  private drawLinefill(
+    ctx: CanvasRenderingContext2D,
+    props: Record<string, unknown>,
+    geometry: Geometry,
+    lines: ReadonlyMap<number, Record<string, unknown>>,
+  ): void {
+    if (isNa(props.color)) return;
+    const quad = linefillPolygon(props, lines, geometry);
+    if (!quad) return;
+
+    ctx.fillStyle = pineColorToRgba(typeof props.color === 'string' ? props.color : null);
+    ctx.beginPath();
+    ctx.moveTo(quad[0][0], quad[0][1]);
+    for (const [x, y] of quad.slice(1)) ctx.lineTo(x, y);
+    ctx.closePath();
+    ctx.fill();
+  }
+
   private drawLine(ctx: CanvasRenderingContext2D, props: Record<string, unknown>, geometry: Geometry): void {
     if (isNa(props.color)) return;
-
-    const xloc = str(props.xloc, 'bar_index');
-    const extend = str(props.extend, 'none');
-    const x1 = geometry.x(props.x1, xloc);
-    const x2 = geometry.x(props.x2, xloc);
-    const y1 = geometry.y(props.y1);
-    const y2 = geometry.y(props.y2);
-    if (x1 === null || x2 === null || y1 === null || y2 === null) return;
-
-    let [ax, ay, bx, by] = [x1, y1, x2, y2];
-    const dx = x2 - x1;
-    // A near-zero dx is a vertical line; extending it horizontally is meaningless, and the
-    // slope would blow up. Pine's own hlines arrive as x2 = x1 + 1ms, so this matters.
-    if (Math.abs(dx) > 1e-6) {
-      const slope = (y2 - y1) / dx;
-      if (extend === 'right' || extend === 'both') {
-        bx = geometry.width;
-        by = y1 + slope * (bx - x1);
-      }
-      if (extend === 'left' || extend === 'both') {
-        ax = 0;
-        ay = y1 + slope * (ax - x1);
-      }
-    }
+    const ends = lineEndpoints(props, geometry);
+    if (!ends) return;
+    const { ax, ay, bx, by } = ends;
 
     ctx.strokeStyle = pineColorToRgba(typeof props.color === 'string' ? props.color : null);
     applyLineStyle(ctx, str(props.style, 'solid'), num(props.width) ?? 1);

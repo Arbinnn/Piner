@@ -174,6 +174,100 @@ function rewriteStudyToIndicator(source: string): string {
 }
 
 /**
+ * Positional parameter order of `plot()`, from the Pine reference. The engine reads only the
+ * first three positionally.
+ */
+const PLOT_PARAMS = [
+  'series', 'title', 'color', 'linewidth', 'style', 'trackprice', 'histbase', 'offset',
+  'join', 'editable', 'show_last', 'display', 'format', 'precision', 'force_overlay',
+];
+
+/** `plot(series, title, color, …)` — everything from here on is silently discarded. */
+const FIRST_UNREAD_PLOT_ARG = 3;
+
+/** Zero-width layout tokens: the tokenizer emits these at column 1 of every line. */
+const STRUCTURAL_KINDS = new Set(['Newline', 'Indent', 'Dedent', 'EOF']);
+
+/**
+ * Names `plot()`'s positional arguments from `linewidth` on, which the engine otherwise throws
+ * away.
+ *
+ * `outputCall` builds a plot's options object out of NAMED arguments only (`optsObject(e, …)`),
+ * taking just `series`, `title` and `color` positionally. So `plot(hist, 'Histogram', css, 1,
+ * plot.style_columns)` — how nearly every published MACD writes it — arrives with `options: {}`:
+ * the style is gone, the histogram renders as a line, and nothing reports a problem. LuxAlgo's
+ * Adaptive MACD plots its histogram, MACD and signal and all three come out as lines on top of
+ * each other.
+ *
+ * Naming them is a no-op on TradingView (same call, same arguments) and restores `style`,
+ * `histbase`, `offset`, `display` and the rest here. Only the affected call's own columns shift,
+ * and only to the right of the insertion.
+ */
+function rewritePositionalPlotArgs(source: string): string {
+  let tokens;
+  try {
+    tokens = tokenize(source).tokens;
+  } catch {
+    return source;
+  }
+
+  const isCode = (t: { kind: unknown; value: string }): boolean =>
+    !STRUCTURAL_KINDS.has(String(t.kind)) && t.value !== '';
+  const inserts: Array<{ line: number; col: number; text: string }> = [];
+
+  /** Records the name for one argument, unless it is empty or already named. */
+  const nameArg = (from: number, to: number, index: number): void => {
+    if (index < FIRST_UNREAD_PLOT_ARG || index >= PLOT_PARAMS.length) return;
+    const head = tokens.slice(from, to).findIndex(isCode);
+    if (head === -1) return;
+    const first = tokens[from + head];
+    const next = tokens.slice(from + head + 1, to).find(isCode);
+    if (String(first.kind) === 'Ident' && next?.value === '=') return;
+    inserts.push({ line: first.line, col: first.col, text: `${PLOT_PARAMS[index]} = ` });
+  };
+
+  for (let i = 0; i < tokens.length; i += 1) {
+    const t = tokens[i];
+    if (String(t.kind) !== 'Ident' || t.value !== 'plot') continue;
+    // A member access (`plot.style_columns`) or a bare reference is not the call.
+    if (tokens[i - 1]?.value === '.' || tokens[i + 1]?.value !== '(') continue;
+
+    let depth = 0;
+    let index = 0;
+    let start = i + 2;
+    for (let j = i + 1; j < tokens.length; j += 1) {
+      const v = tokens[j].value;
+      if (v === '(' || v === '[') depth += 1;
+      else if (v === ')' || v === ']') {
+        depth -= 1;
+        if (depth === 0) {
+          nameArg(start, j, index);
+          break;
+        }
+      } else if (v === ',' && depth === 1) {
+        nameArg(start, j, index);
+        index += 1;
+        start = j + 1;
+      }
+    }
+  }
+  if (inserts.length === 0) return source;
+
+  const lines = source.split('\n');
+  const byLine = new Map<number, typeof inserts>();
+  for (const ins of inserts) byLine.set(ins.line, [...(byLine.get(ins.line) ?? []), ins]);
+  for (const [lineNo, spots] of byLine) {
+    let line = lines[lineNo - 1];
+    // Rightmost first so an earlier insertion doesn't shift a later spot's column.
+    for (const { col, text } of [...spots].sort((a, b) => b.col - a.col)) {
+      line = `${line.slice(0, col - 1)}${text}${line.slice(col - 1)}`;
+    }
+    lines[lineNo - 1] = line;
+  }
+  return lines.join('\n');
+}
+
+/**
  * Renames a user variable named `color`, which this engine cannot tell apart from the `color.*`
  * namespace: its symbol resolver checks locals before NAMESPACES, so one `color = trend ? a : b`
  * makes every later `color.new(...)` resolve against the variable and evaluate to `na` — the
@@ -239,7 +333,9 @@ function rewriteShadowedColor(source: string): string {
 export function compileScript(source: string): CompileOutcome {
   try {
     const patched = rewriteConditionalUdtHistory(
-      unwrapSelfSecurity(rewriteShadowedColor(rewriteLegacyBuiltins(rewriteStudyToIndicator(source)))).source,
+      unwrapSelfSecurity(
+        rewritePositionalPlotArgs(rewriteShadowedColor(rewriteLegacyBuiltins(rewriteStudyToIndicator(source)))),
+      ).source,
     ).source;
     const compiled = compile(patched);
     // Read from the patched source: a `study(...)` declaration is only a recognizable

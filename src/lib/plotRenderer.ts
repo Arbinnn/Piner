@@ -1,5 +1,6 @@
 import {
   CandlestickSeries,
+  HistogramSeries,
   LineSeries,
   LineType,
   type CandlestickData,
@@ -31,6 +32,13 @@ const STEP_STYLES = new Set(['stepline', 'steplinebr', 'stepline_diamond']);
  * the full width of the chart, overlapping, instead of handing off.
  */
 const BREAK_ON_NA_STYLES = new Set(['linebr', 'steplinebr', 'areabr']);
+
+/**
+ * Styles that draw a bar per point rather than a path. A line series cannot approximate them:
+ * a MACD histogram plotted as a line is an unreadable zig-zag through zero, sharing the pane
+ * with the two lines it is supposed to sit behind.
+ */
+const COLUMN_STYLES = new Set(['columns', 'histogram']);
 const OVERLAY_PANE = 0;
 const SEPARATE_PANE = 1;
 
@@ -260,12 +268,14 @@ function markersToSeriesMarkers(marker: MarkerSeries, candles: readonly Candle[]
   return out;
 }
 
-type HostSeries = ISeriesApi<'Line'> | ISeriesApi<'Candlestick'>;
+type HostSeries = ISeriesApi<'Line'> | ISeriesApi<'Candlestick'> | ISeriesApi<'Histogram'>;
 
 interface TrackedPlot {
   kind: 'plot';
   paneIndex: number;
-  api: ISeriesApi<'Line'>;
+  api: ISeriesApi<'Line'> | ISeriesApi<'Histogram'>;
+  /** Which series type is mounted — a style change has to recreate, not just re-option. */
+  columns: boolean;
   /** `plot(..., display=display.none)` hides the series — and with it anything attached to it. */
   visible: boolean;
   /** Whether the series holds any real point. An empty one cannot host (see `paneHostFor`). */
@@ -458,6 +468,7 @@ export class PlotRenderer {
       // the script painted `color = na`, and `offset =` shifts each point along the time axis.
       const runs = plotRuns(plot, candles, BREAK_ON_NA_STYLES.has(style));
       const visible = isVisible(plot.options);
+      const columns = COLUMN_STYLES.has(style);
 
       runs.forEach((points, run) => {
         // Run 0 keeps the plain `plot:<id>` key so a non-broken plot's series is reused
@@ -467,25 +478,28 @@ export class PlotRenderer {
         seen.add(key);
         const existing = this.tracked.get(key);
         const api =
-          existing?.kind === 'plot' && existing.paneIndex === plotPane
+          existing?.kind === 'plot' && existing.paneIndex === plotPane && existing.columns === columns
             ? existing.api
-            : this.recreatePlotSeries(key, existing, plotPane);
+            : this.recreatePlotSeries(key, existing, plotPane, columns);
 
         api.applyOptions({
           // One legend entry and one price label for the whole plot, not one per run.
           title: run === 0 ? plot.title : '',
           color: seriesLegendColor(plot.colors),
-          lineWidth: asLineWidth(plot.options.linewidth),
-          lineType: lineTypeFor(plot.options),
           visible: visible && this.plotsVisible,
           // One price label and ONE price line for the whole plot, not one per run. Both
           // default to on per series, so a plot that breaks into 67 rays would otherwise
           // stripe the chart with 67 dotted horizontals at 67 different last values.
           lastValueVisible: run === runs.length - 1,
           priceLineVisible: run === runs.length - 1,
+          // A column's bar hangs from the value down to `histbase` (Pine's default is 0);
+          // a line's shape comes from its width and whether it steps.
+          ...(columns
+            ? { base: asNumber(plot.options.histbase, 0) }
+            : { lineWidth: asLineWidth(plot.options.linewidth), lineType: lineTypeFor(plot.options) }),
         });
         api.setData(points);
-        this.tracked.set(key, { kind: 'plot', paneIndex: plotPane, api, visible, hasData: points.length > 0 });
+        this.tracked.set(key, { kind: 'plot', paneIndex: plotPane, api, columns, visible, hasData: points.length > 0 });
       });
     }
     // Only grow the lower pane if something actually landed there — a script whose every plot
@@ -493,10 +507,17 @@ export class PlotRenderer {
     if (usedSeparatePane) this.ensurePaneHeight();
   }
 
-  private recreatePlotSeries(key: string, existing: Tracked | undefined, paneIndex: number): ISeriesApi<'Line'> {
+  private recreatePlotSeries(
+    key: string,
+    existing: Tracked | undefined,
+    paneIndex: number,
+    columns: boolean,
+  ): ISeriesApi<'Line'> | ISeriesApi<'Histogram'> {
     if (existing?.kind === 'plot') this.chart.removeSeries(existing.api);
-    const api = this.chart.addSeries(LineSeries, {}, paneIndex);
-    this.tracked.set(key, { kind: 'plot', paneIndex, api, visible: true, hasData: false });
+    const api = columns
+      ? this.chart.addSeries(HistogramSeries, {}, paneIndex)
+      : this.chart.addSeries(LineSeries, {}, paneIndex);
+    this.tracked.set(key, { kind: 'plot', paneIndex, api, columns, visible: true, hasData: false });
     return api;
   }
 
