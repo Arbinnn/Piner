@@ -18,6 +18,7 @@ import {
   type Diagnostic,
 } from '@heyphat/piner';
 import type { PineError } from '../../src/types/pine.ts';
+import { unwrapSelfSecurity } from './security.ts';
 import { rewriteConditionalUdtHistory } from './udtHistory.ts';
 
 export interface CompileOutcome {
@@ -238,7 +239,7 @@ function rewriteShadowedColor(source: string): string {
 export function compileScript(source: string): CompileOutcome {
   try {
     const patched = rewriteConditionalUdtHistory(
-      rewriteShadowedColor(rewriteLegacyBuiltins(rewriteStudyToIndicator(source))),
+      unwrapSelfSecurity(rewriteShadowedColor(rewriteLegacyBuiltins(rewriteStudyToIndicator(source)))).source,
     ).source;
     const compiled = compile(patched);
     // Read from the patched source: a `study(...)` declaration is only a recognizable

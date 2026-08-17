@@ -184,6 +184,11 @@ export function usePineScript({
       if (!renderer || candlesRef.current.length === 0) return;
 
       const seq = ++runSeqRef.current;
+      // A Run replaces the chart, so it replaces the console too. Without this, warnings from
+      // whatever ran before stay on screen next to the new run's summary and read as its own —
+      // three scripts' worth of `ta.*` diagnostics pointing at lines the current source does
+      // not have. Input-driven re-runs keep the log, since the script is the same one.
+      if (fresh) setEntries([]);
       setIsRunning(true);
       const requestSource = sourceRef.current;
       // Strategy mode is known from the editor text before the response lands, so the tester

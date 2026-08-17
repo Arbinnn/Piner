@@ -13,6 +13,7 @@ import { executeStrategy } from '../strategy/executor.ts';
 import { compileScript } from './compiler.ts';
 import { runScript } from './runtime.ts';
 import { compileCache, compileKey, resultCache, resultKey } from './cache.ts';
+import { describeSecurityUnwrap, unwrapSelfSecurity } from './security.ts';
 import { describeUdtHistory, rewriteConditionalUdtHistory } from './udtHistory.ts';
 import { DEFAULT_STRATEGY_CONFIG, type StrategyConfig } from '../../src/strategy/types.ts';
 import type { Candle } from '../../src/types/candle.ts';
@@ -183,9 +184,11 @@ export async function executePine(req: ExecuteRequest): Promise<ExecuteResponse>
   const meta = metaOf(compiled);
   // Only what the compiler's hoist could NOT lift stays a warning; the rest is already fixed.
   const udtReads = rewriteConditionalUdtHistory(req.script).remaining;
+  const unwrapped = unwrapSelfSecurity(req.script).unwrapped;
   const diagnostics = [
     ...compiled.diagnostics.filter((d) => d.severity !== 'error'),
     ...securityWarnings(compiled),
+    ...(unwrapped > 0 ? [{ severity: 'warning' as const, line: 0, col: 0, message: describeSecurityUnwrap(unwrapped) }] : []),
     ...(udtReads.length > 0
       ? [{ severity: 'warning' as const, line: udtReads[0].line, col: udtReads[0].col, message: describeUdtHistory(udtReads) }]
       : []),

@@ -1,11 +1,18 @@
 /**
- * Finds history reads on a UDT field that sit inside a conditional block.
+ * Finds history reads on a UDT field that the engine cannot serve.
  *
  * `b.h[1]` where `b` is a user-defined type reads `na` when the line only runs on some bars.
  * The series column behind the field is written where the expression EXECUTES, so a branch that
  * fires on a handful of bars leaves the column empty and `[1]` finds nothing. At global scope —
  * or in a `for` body or a function body, both of which run every bar — the same expression is
  * correct.
+ *
+ * A second, worse case: a NON-CONSTANT offset (`b.h[i]` with `i` a loop counter) returns `na`
+ * even where the column is continuous, while the identical read on a plain series (`high[i]`)
+ * is correct. Verified against the installed engine. Every volume-profile script is built on
+ * exactly that shape — LuxAlgo's Swing Volume Profiles accumulates `b.h[bI]`/`b.l[bI]` over a
+ * bar range, gets zeros for every price row, and then divides by a zero maximum: 200 boxes are
+ * created with `na` widths and the chart shows the levels with no profiles at all.
  *
  * This is not an error and produces no runtime failure: the read yields `na`, `nz()` turns it
  * into 0, and the script carries on computing with zeros. LuxAlgo's Buyside & Sellside
@@ -19,8 +26,9 @@
  *
  *  - the receiver must be a variable of a type the script itself declared with `type`;
  *  - the access must be a direct field read followed by `[` (`b.h[1]`), not a method call;
- *  - at least one enclosing block must be a CONDITIONAL. A `for`/`while` body or a function
- *    body is left alone, because those execute on every bar and the column stays continuous.
+ *  - the read must be either inside a CONDITIONAL block or indexed by a non-constant offset.
+ *    A constant offset in a `for`/`while` body, a function body or at global scope is left
+ *    alone, because those execute on every bar and the column stays continuous.
  */
 
 import { tokenize } from '@heyphat/piner';
@@ -43,8 +51,12 @@ interface Occurrence {
   startCol: number;
   endCol: number;
   conditional: boolean;
-  /** Whether the index can be evaluated at global scope (see `rewriteConditionalUdtHistory`). */
-  hoistable: boolean;
+  /** A literal integer offset — the only form the engine serves reliably. */
+  constIndex: boolean;
+  /** Whether a mirror can legally be declared for this receiver (see `rewriteConditionalUdtHistory`). */
+  mirrorable: boolean;
+  /** Line the receiver was declared on — where the mirror is appended. */
+  declLine: number;
 }
 
 /** Block openers whose body runs only on some bars. `for`/`while` bodies run every bar. */
@@ -81,18 +93,27 @@ function declaredTypes(tokens: readonly Token[]): Set<string> {
   return types;
 }
 
+/** Where a UDT-typed variable was declared, and whether that declaration is a `var`/`varip` one. */
+interface UdtDecl {
+  line: number;
+  /** `var` propagates down a comma-chained declaration, so a mirror appended there would freeze. */
+  persistent: boolean;
+}
+
+const PERSISTENT = new Set(['var', 'varip']);
+
 /**
  * Variables holding an instance of one of those types, by either declaration form, mapped to
- * the line they were declared on — the rewrite appends its hoists to that line.
+ * the line they were declared on — the rewrite appends its mirror to that line.
  */
-function udtVariables(tokens: readonly Token[], types: ReadonlySet<string>): Map<string, number> {
-  const vars = new Map<string, number>();
+function udtVariables(tokens: readonly Token[], types: ReadonlySet<string>): Map<string, UdtDecl> {
+  const vars = new Map<string, UdtDecl>();
   for (let i = 0; i < tokens.length - 2; i += 1) {
     const [a, b, c] = [tokens[i], tokens[i + 1], tokens[i + 2]];
 
     // `bar b = ...` / `var ZZ z = ...` — the type name introduces the declaration.
     if (isIdent(a) && types.has(a.value) && isIdent(b) && c.value === '=' && !vars.has(b.value)) {
-      vars.set(b.value, a.line);
+      vars.set(b.value, { line: a.line, persistent: PERSISTENT.has(tokens[i - 1]?.value ?? '') });
     }
 
     // `b = bar.new(...)` — inferred from the constructor instead.
@@ -104,26 +125,10 @@ function udtVariables(tokens: readonly Token[], types: ReadonlySet<string>): Map
       tokens[i + 3]?.value === '.' &&
       !vars.has(a.value)
     ) {
-      vars.set(a.value, a.line);
+      vars.set(a.value, { line: a.line, persistent: PERSISTENT.has(tokens[i - 1]?.value ?? '') });
     }
   }
   return vars;
-}
-
-/**
- * Identifiers assigned at global scope, mapped to the line of their assignment. Used to decide
- * whether an index expression like `[srLN]` can legally be evaluated where the hoist is placed.
- */
-function globalAssignments(tokens: readonly Token[], indents: ReadonlyMap<number, number>): Map<string, number> {
-  const globals = new Map<string, number>();
-  for (let i = 0; i < tokens.length - 1; i += 1) {
-    const t = tokens[i];
-    if (!isIdent(t) || t.col !== indents.get(t.line)) continue;
-    if (t.col !== 1) continue;
-    const next = tokens[i + 1];
-    if (next?.value === '=' && !globals.has(t.value)) globals.set(t.value, t.line);
-  }
-  return globals;
 }
 
 /** Indentation of each line, as the column of its first token. Pine blocks are indentation-based. */
@@ -179,7 +184,6 @@ function occurrences(source: string, tokens: readonly Token[]): Occurrence[] {
 
   const indents = lineIndents(tokens);
   const heads = lineHeads(tokens);
-  const globals = globalAssignments(tokens, indents);
   const lines = source.split('\n');
   const found: Occurrence[] = [];
 
@@ -206,15 +210,11 @@ function occurrences(source: string, tokens: readonly Token[]): Occurrence[] {
     const indexTokens = tokens.slice(i + 4, close);
     const index = lines[recv.line - 1].slice(open.col, tokens[close].col - 1);
 
-    // Hoistable only when the index means the same thing at global scope: a plain integer, or
-    // an identifier assigned globally BEFORE the line the hoist will sit on. A loop counter or
-    // any block-local name would be undefined out there, so those are left for the warning.
-    const declLine = vars.get(recv.value)!;
+    // The mirror is only ever `<recv>.<field>` — never the index — so any index expression is
+    // fine wherever it already stood. What it does need is a declaration line it can attach to:
+    // one that is not `var` (which would freeze the mirror on bar 0) and that comes first.
+    const decl = vars.get(recv.value)!;
     const single = indexTokens.length === 1 ? indexTokens[0] : undefined;
-    const hoistable =
-      single !== undefined &&
-      (String(single.kind) === 'Int' ||
-        (isIdent(single) && (globals.get(single.value) ?? Infinity) < declLine));
 
     found.push({
       recv: recv.value,
@@ -224,7 +224,9 @@ function occurrences(source: string, tokens: readonly Token[]): Occurrence[] {
       startCol: recv.col,
       endCol: tokens[close].col + 1,
       conditional: insideConditional(recv.line, indents, heads),
-      hoistable,
+      constIndex: single !== undefined && String(single.kind) === 'Int',
+      mirrorable: !decl.persistent && recv.line > decl.line,
+      declLine: decl.line,
     });
   }
   return found;
@@ -232,28 +234,35 @@ function occurrences(source: string, tokens: readonly Token[]): Occurrence[] {
 
 export interface UdtHistoryRewrite {
   source: string;
-  /** How many distinct reads were lifted to global scope. */
+  /** How many distinct fields got a mirror series. */
   hoisted: number;
-  /** Conditional reads that could not be lifted — still broken, still worth warning about. */
+  /** Reads that could not be mirrored — still broken, still worth warning about. */
   remaining: UdtHistoryRead[];
 }
 
 /**
- * Lifts conditional UDT-field history reads to global scope, so scripts that hit the defect
- * run correctly without being edited.
+ * Redirects unreliable UDT-field history reads through a plain global mirror series, so scripts
+ * that hit the defect run correctly without being edited.
  *
  * The transformation is the one a user would apply by hand: read the field once per bar at
- * global scope, then use that value inside the block. On TradingView it is a no-op — the
- * expression never depended on the branch — and here it is the difference between a chart and
- * a blank screen. LuxAlgo's Support & Resistance MTF assigns `pp.x := b.i[srLN]` inside a
- * conditional; `pp.x` feeds the x coordinate of nearly every box, line and label it draws, so
- * unrewritten the whole script places at an `na` bar index and renders nothing.
+ * global scope (`_h_b_h = b.h`), then index THAT everywhere (`b.h[bI]` -> `_h_b_h[bI]`). On
+ * TradingView it is a no-op — the value never depended on the branch or on the offset being a
+ * literal — and here it is the difference between a chart and a blank screen. LuxAlgo's Support
+ * & Resistance MTF assigns `pp.x := b.i[srLN]` inside a conditional; Swing Volume Profiles sums
+ * `nzV[bI] * (b.h[bI] - b.l[bI])` across a loop. Unrewritten, the first places every drawing at
+ * an `na` bar index and the second builds every profile out of zeros.
  *
- * Hoists are appended to the receiver's own declaration line as comma-chained assignments
- * (`bar b = bar.new(), _h_b_i_1 = b.i[1]`), which Pine accepts. That keeps every line number in
- * the file unchanged, so diagnostics still point where the user is looking. Columns after a
+ * Mirroring the FIELD rather than the indexed read is what makes a loop counter work: the index
+ * expression stays exactly where it was written, so it never has to be valid at global scope.
+ *
+ * Mirrors are appended to the receiver's own declaration line as comma-chained assignments
+ * (`bar b = bar.new(), _h_b_i = b.i`), which Pine accepts. That keeps every line number in the
+ * file unchanged, so diagnostics still point where the user is looking. Columns after a
  * rewritten read on the same line do shift, since the replacement name is not the same width as
  * the text it replaces.
+ *
+ * ponytail: a receiver reassigned later in the bar (`b := bar.new(...)`) mirrors its value as of
+ * the declaration line. Move the mirror to the last assignment if a script ever needs it.
  */
 export function rewriteConditionalUdtHistory(source: string): UdtHistoryRewrite {
   let tokens: readonly Token[];
@@ -263,30 +272,31 @@ export function rewriteConditionalUdtHistory(source: string): UdtHistoryRewrite 
     return { source, hoisted: 0, remaining: [] };
   }
 
+  // A constant offset outside every conditional is already served correctly — leave it written
+  // as it is, so a correct script comes out of here byte-for-byte unchanged.
+  const suspect = (o: Occurrence): boolean => o.conditional || !o.constIndex;
   const all = occurrences(source, tokens);
-  const targets = all.filter((o) => o.conditional && o.hoistable);
+  const targets = all.filter((o) => suspect(o) && o.mirrorable);
   const remaining = all
-    .filter((o) => o.conditional && !o.hoistable)
+    .filter((o) => suspect(o) && !o.mirrorable)
     .map((o) => ({ name: `${o.recv}.${o.field}`, line: o.line, col: o.startCol }));
 
   if (targets.length === 0) return { source, hoisted: 0, remaining: dedupe(remaining) };
 
   const taken = new Set(tokens.filter((t) => isIdent(t)).map((t) => t.value));
   const names = new Map<string, string>();
-  const hoistsByLine = new Map<number, string[]>();
-  const declLines = udtVariables(tokens, declaredTypes(tokens));
+  const mirrorsByLine = new Map<number, string[]>();
 
   for (const o of targets) {
-    const key = `${o.recv}.${o.field}[${o.index}]`;
+    const key = `${o.recv}.${o.field}`;
     if (names.has(key)) continue;
 
-    let name = `_h_${o.recv}_${o.field}_${o.index.replace(/[^0-9A-Za-z_]/g, '')}`;
+    let name = `_h_${o.recv}_${o.field}`;
     for (let n = 1; taken.has(name); n += 1) name = `_h${n}_${o.recv}_${o.field}`;
     taken.add(name);
     names.set(key, name);
 
-    const declLine = declLines.get(o.recv)!;
-    hoistsByLine.set(declLine, [...(hoistsByLine.get(declLine) ?? []), `${name} = ${key}`]);
+    mirrorsByLine.set(o.declLine, [...(mirrorsByLine.get(o.declLine) ?? []), `${name} = ${key}`]);
   }
 
   const lines = source.split('\n');
@@ -297,18 +307,20 @@ export function rewriteConditionalUdtHistory(source: string): UdtHistoryRewrite 
   for (const [line, occs] of byLine) {
     let text = lines[line - 1];
     for (const o of [...occs].sort((a, b) => b.startCol - a.startCol)) {
-      const name = names.get(`${o.recv}.${o.field}[${o.index}]`)!;
-      text = `${text.slice(0, o.startCol - 1)}${name}${text.slice(o.endCol - 1)}`;
+      const name = names.get(`${o.recv}.${o.field}`)!;
+      // Keep the brackets and the index text: only the receiver.field part is replaced.
+      const indexed = text.slice(o.startCol - 1, o.endCol - 1);
+      text = `${text.slice(0, o.startCol - 1)}${name}${indexed.slice(indexed.indexOf('['))}${text.slice(o.endCol - 1)}`;
     }
     lines[line - 1] = text;
   }
 
-  for (const [line, hoists] of hoistsByLine) {
+  for (const [line, mirrors] of mirrorsByLine) {
     // Append INSIDE the line, before any CR: on a CRLF file a naive append puts the comma
     // after the carriage return, where the tokenizer reads it as the start of the next line.
     const text = lines[line - 1];
     const cr = text.endsWith('\r') ? '\r' : '';
-    lines[line - 1] = `${cr ? text.slice(0, -1) : text}, ${hoists.join(', ')}${cr}`;
+    lines[line - 1] = `${cr ? text.slice(0, -1) : text}, ${mirrors.join(', ')}${cr}`;
   }
 
   return { source: lines.join('\n'), hoisted: names.size, remaining: dedupe(remaining) };
@@ -366,9 +378,12 @@ export function findConditionalUdtHistory(source: string): UdtHistoryRead[] {
 export function describeUdtHistory(reads: readonly UdtHistoryRead[]): string {
   const list = reads.map((r) => `  ${r.name}[…]  (line ${r.line})`).join('\n');
   return (
-    `History of a user-defined type's field is read inside a conditional block:\n${list}\n\n` +
-    'The series behind a UDT field is only written on bars where the line executes, so inside ' +
-    'an if/else the history is empty and the read returns na — which nz() then turns into 0, ' +
-    'silently. Assign it at global scope and use that variable inside the block instead.'
+    `History of a user-defined type's field is read where this engine cannot serve it:\n${list}\n\n` +
+    'The series behind a UDT field is only written on bars where the line executes, and it is ' +
+    'only indexable by a literal offset, so inside an if/else — or with a variable offset like ' +
+    '[i] — the read returns na, which nz() then turns into 0, silently. Assign the field to a ' +
+    'plain variable at global scope (x = b.h) and index that instead (x[i]). These reads could ' +
+    'not be rewritten automatically because the receiver is declared with var, or is used above ' +
+    'its own declaration.'
   );
 }

@@ -105,11 +105,39 @@ test('the rewrite handles CRLF sources', () => {
   assert.equal(compileScript(source).error, null);
 });
 
-test('an index the hoist cannot evaluate globally is left alone and still warned about', () => {
-  // `i` is a loop counter — undefined at global scope, so hoisting it would not compile.
+test('a loop-counter index is mirrored, index text and all', () => {
+  // The mirror is the FIELD, never the indexed read, so `i` stays where it was written.
   const src = `${TYPE}var float out = na\nif cond\n    for i = 0 to 2\n        out := b.h[i]\nplot(out)\n`;
-  const { hoisted, remaining } = rewriteConditionalUdtHistory(src);
+  const { hoisted, remaining, source } = rewriteConditionalUdtHistory(src);
+  assert.equal(hoisted, 1);
+  assert.deepEqual(remaining, []);
+  assert.match(source, /_h_b_h\[i\]/);
+  assert.equal(compileScript(source).error, null);
+});
+
+test('a variable index is mirrored even at global scope — a literal offset is the only reliable one', async () => {
+  const src = `${TYPE}n = 1\nout := b.h[n]\nplot(out)\n`;
+  assert.equal(rewriteConditionalUdtHistory(src).hoisted, 1);
+  const values = (await plotValues(src)).filter(Number.isFinite);
+  assert.ok(values.length > 0, 'every bar was na — the mirror did not take effect');
+  assert.ok(values.every((v) => v >= 12 && v <= 19), `expected real highs, got ${JSON.stringify(values.slice(0, 4))}`);
+});
+
+test('a var-declared receiver is left alone and warned about', () => {
+  // `var b = ..., _h = b.h` would make the mirror var too: frozen at bar 0 on every later bar.
+  const src = `//@version=5
+indicator("t")
+type bar
+    float h = high
+var bar b = bar.new()
+var float out = na
+if bar_index % 3 == 0
+    out := b.h[1]
+plot(out)
+`;
+  const { hoisted, remaining, source } = rewriteConditionalUdtHistory(src);
   assert.equal(hoisted, 0);
+  assert.equal(source, src);
   assert.deepEqual(remaining.map((r) => r.name), ['b.h']);
 });
 
