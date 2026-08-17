@@ -233,7 +233,7 @@ Column **TV** = does the fix survive the TradingView Charting Library migration 
 `keep` = still needed as-is · `port` = same problem, new mechanism · `moot` = the library
 handles it · `redo` = must be re-solved from scratch, see §16.
 
-### 7.1 Compile stage — [server/pine/compiler.ts](server/pine/compiler.ts)
+### 7.1 Compile & run stage — [server/pine/](server/pine/)
 
 | Fix | Symptom it cures | TV |
 |---|---|---|
@@ -241,6 +241,7 @@ handles it · `redo` = must be re-solved from scratch, see §16.
 | **`rewriteLegacyBuiltins()`** — bare v3/v4 builtins → `math.*` / `ta.*` | Unresolved calls are **not** a compile error in piner — they evaluate to `na` every bar. A v4 ADX/DI strategy on bare `rma`/`tr`/`crossover` compiled clean with every plot and every entry condition dead. Rewritten in place, columns preserved so diagnostics still land right. | keep |
 | **`rewriteShadowedColor()`** — renames a user variable named `color` | The symbol resolver checks locals before namespaces, so one `color = trend ? a : b` made every later `color.new(...)` resolve against the variable → `na` → a script that renders with no colours at all. Replacement is the same length, so diagnostic columns are untouched. | keep |
 | **`rewriteStudyToIndicator()`** — v3/v4 `study(...)` → `indicator(...)` | The engine knows only `indicator`/`strategy`; an unrecognized declaration is not an error, it just does nothing — discarding the **entire header at once**. Title became `""`, `overlay` defaulted to false (an overlay script landed on a separate pane), and `max_lines_count` / `max_labels_count` / `max_boxes_count` fell back to Pine's default of **50**. LuxAlgo's Volume Profile declares `max_lines_count=500` and draws 201 lines; unrewritten it produced 50, unnamed, on the wrong pane. The two declarations share their first three positional parameters, so the swap is safe. `positionalOverlay()` now reads the **patched** source, since `study` is only a recognizable declaration afterwards. | keep |
+| **`patchHtfTime()`** — makes `time(tf)` honour its timeframe ([htfTime.ts](server/pine/htfTime.ts), applied in [runtime.ts](server/pine/runtime.ts)) | piner's `timeFn` ignores its timeframe argument and returns the chart bar's own `time`. No error — just a plausible timestamp — so `ta.change(time('M'))`, the anchor every profile script uses to detect a new period, was true on **every** bar. LuxAlgo's Liquidity Sentiment Profile drew all 500 of its boxes with `left == right`: a run reporting 500 drawings over an empty chart. Patches the context method rather than the source, so `time(tfVar)` with a runtime string is covered too; bucket boundaries mirror the engine's own `bucketKey`, which `request.security` already gets right. | keep |
 
 ### 7.2 Strategy correctness
 

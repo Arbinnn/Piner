@@ -11,6 +11,7 @@ import type { StrategyMetrics, StrategyReport, StrategySettings } from '@heyphat
 import type { OpenLotSnapshot } from '../../src/strategy/strategyAdapter.ts';
 import type { InputValues } from '../../src/types/inputs.ts';
 import type { PineError } from '../../src/types/pine.ts';
+import { patchHtfTime } from './htfTime.ts';
 
 /** Present only for a `strategy(...)` script: piner's backtest output, raw. */
 export interface StrategyRunOutcome {
@@ -50,6 +51,7 @@ export async function runScript(
       inputs,
       ...(opts.strategy ? { strategy: opts.strategy } : {}),
     });
+    patchHtfTime(engine.ctx as unknown as Parameters<typeof patchHtfTime>[0]);
     await engine.run({ symbol: opts.symbol, timeframe: opts.timeframe, mintick: opts.mintick });
     return {
       outputs: engine.outputs,
