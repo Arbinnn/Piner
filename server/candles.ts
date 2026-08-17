@@ -12,7 +12,10 @@ import path from 'node:path';
 import type { Bar } from '@heyphat/piner';
 import type { Candle } from '../src/types/candle.ts';
 
-const DATA_DIR = path.join(import.meta.dirname, 'data');
+// `process.cwd()` (not `import.meta.dirname`) — a serverless bundler inlines this module into
+// one output file that no longer lives next to `data/`, but the process still starts at the
+// project root both locally (`npm run server`) and on Vercel (`/var/task`).
+const DATA_DIR = path.join(process.cwd(), 'server', 'data');
 /** Filename-safe, and deliberately no `/`, `\` or `.` runs — the path is built from this. */
 const SYMBOL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
 const REQUIRED_COLUMNS = ['date', 'open', 'high', 'low', 'close', 'volume'] as const;
