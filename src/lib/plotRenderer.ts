@@ -39,6 +39,17 @@ const BREAK_ON_NA_STYLES = new Set(['linebr', 'steplinebr', 'areabr']);
  * with the two lines it is supposed to sit behind.
  */
 const COLUMN_STYLES = new Set(['columns', 'histogram']);
+
+/**
+ * Styles that mark each bar on its own instead of tracing a path. Pine draws a dot (or a
+ * cross) per bar and NOTHING between them, so an `na` bar is simply a hole — which is how a
+ * Parabolic SAR shows its trend flips. Drawn as a joined line instead, every flip is bridged
+ * and the dotted arcs collapse into one continuous zig-zag.
+ *
+ * lightweight-charts has no scatter series; a line with the line itself hidden and its point
+ * markers shown is the same picture.
+ */
+const POINT_STYLES = new Set(['circles', 'cross']);
 const OVERLAY_PANE = 0;
 const SEPARATE_PANE = 1;
 /** Floor on the revealed window, so a lone far-right label cannot zoom the chart to a handful
@@ -81,6 +92,23 @@ function asLineWidth(value: unknown): 1 | 2 | 3 | 4 {
 function lineTypeFor(options: Record<string, unknown>): LineType {
   const style = typeof options.style === 'string' ? options.style : '';
   return STEP_STYLES.has(style) ? LineType.WithSteps : LineType.Simple;
+}
+
+/** How a non-column plot is drawn: a path, stepped or not, or bare per-bar marks. */
+export function lineShapeFor(options: Record<string, unknown>): {
+  lineWidth: 1 | 2 | 3 | 4;
+  lineType: LineType;
+  lineVisible: boolean;
+  pointMarkersVisible: boolean;
+} {
+  const style = typeof options.style === 'string' ? options.style : '';
+  const points = POINT_STYLES.has(style);
+  return {
+    lineWidth: asLineWidth(options.linewidth),
+    lineType: lineTypeFor(options),
+    lineVisible: !points,
+    pointMarkersVisible: points,
+  };
 }
 
 function isVisible(options: Record<string, unknown>): boolean {
@@ -503,7 +531,7 @@ export class PlotRenderer {
           // a line's shape comes from its width and whether it steps.
           ...(columns
             ? { base: asNumber(plot.options.histbase, 0) }
-            : { lineWidth: asLineWidth(plot.options.linewidth), lineType: lineTypeFor(plot.options) }),
+            : lineShapeFor(plot.options)),
         });
         api.setData(points);
         this.tracked.set(key, { kind: 'plot', paneIndex: plotPane, api, columns, visible, hasData: points.length > 0 });

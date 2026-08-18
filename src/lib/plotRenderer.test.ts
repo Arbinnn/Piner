@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { PlotSeries } from '@heyphat/piner';
-import { plotRuns } from './plotRenderer';
+import { lineShapeFor, plotRuns } from './plotRenderer';
 import type { Candle } from '../types/candle';
 
 const candles: Candle[] = Array.from({ length: 6 }, (_, i) => ({
@@ -51,4 +51,14 @@ test('`offset` shifts each point along the time axis and drops what falls off', 
   // A positive offset pushes right and drops the tail instead.
   const right = plotRuns(plot([1, 2, 3, 4, 5, 6], [], { offset: 2 }), candles, false);
   assert.deepEqual(times(right), [[1002, 1003, 1004, 1005]]);
+});
+
+test('circles/cross draw as bare point markers, everything else as a path', () => {
+  const dots = lineShapeFor({ style: 'circles' });
+  assert.equal(dots.lineVisible, false);
+  assert.equal(dots.pointMarkersVisible, true);
+
+  const line = lineShapeFor({ style: 'linebr' });
+  assert.equal(line.lineVisible, true);
+  assert.equal(line.pointMarkersVisible, false);
 });
