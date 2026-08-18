@@ -17,7 +17,7 @@ import type { CandleSeries, DrawObject, HLine, MarkerSeries, PlotSeries } from '
 import type { Candle } from '../types/candle';
 import type { PineOutputs } from '../types/pine';
 import { pineColorToRgba } from './color';
-import { DrawingsPrimitive, drawingsPriceExtent, drawingsRightExtent } from './drawings';
+import { DrawingsPrimitive, drawingsPriceExtent, drawingsXExtent } from './drawings';
 import { FillsPrimitive, resolveFills, type ResolvedFill } from './fills';
 import { BackgroundPrimitive } from './backgrounds';
 
@@ -41,6 +41,9 @@ const BREAK_ON_NA_STYLES = new Set(['linebr', 'steplinebr', 'areabr']);
 const COLUMN_STYLES = new Set(['columns', 'histogram']);
 const OVERLAY_PANE = 0;
 const SEPARATE_PANE = 1;
+/** Floor on the revealed window, so a lone far-right label cannot zoom the chart to a handful
+ *  of candles. */
+const MIN_REVEAL_BARS = 50;
 
 /**
  * A line series that draws nothing but still participates in the pane (so price lines /
@@ -374,23 +377,27 @@ export class PlotRenderer {
 
   /**
    * Scripts that render a profile to the right of price (`bar_index + 50` and beyond) place
-   * their output past the last candle, where the default view never reaches. Widen to the
-   * right so it is on screen — but only when it actually falls outside the current range, so
-   * a user who has already scrolled there is left alone.
+   * their output past the last candle, where the default view never reaches. Scroll right so
+   * it is on screen — but only when it actually falls outside the current range, so a user
+   * who has already scrolled there is left alone.
    */
   private revealDrawings(drawings: readonly DrawObject[], candles: readonly Candle[]): void {
     if (drawings.length === 0 || candles.length === 0) return;
-    const extent = drawingsRightExtent(drawings, candles);
-    if (extent === null || extent <= candles.length - 1) return;
+    const extent = drawingsXExtent(drawings, candles);
+    if (extent === null || extent.max <= candles.length - 1) return;
 
     const timeScale = this.chart.timeScale();
     const range = timeScale.getVisibleLogicalRange();
-    if (!range || extent <= range.to) return;
+    if (!range || extent.max <= range.to) return;
 
-    // Scroll right, keeping the window the same width. Stretching `to` instead would squeeze
-    // the whole history into the same pixels and shrink the profile to an unreadable sliver.
-    const to = extent + 5;
-    timeScale.setVisibleLogicalRange({ from: to - (range.to - range.from), to });
+    // Scroll right, keeping the window the same width — EXCEPT when the drawings span less
+    // than that. A few thousand candles fitted to the pane leave a 300-bar profile ~10% of
+    // the width wide, its rows a pixel each and its labels dropped as illegible, which reads
+    // as "the script only drew one box". Never widens the window, only tightens it.
+    const to = extent.max + 5;
+    const span = Math.max(MIN_REVEAL_BARS, to - extent.min + 5);
+    const width = Math.min(range.to - range.from, span);
+    timeScale.setVisibleLogicalRange({ from: to - width, to });
   }
 
   /** Removes every series/price-line this renderer owns, e.g. before a fresh compile. */

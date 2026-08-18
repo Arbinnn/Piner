@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { linefillPolygon } from './drawings.ts';
+import { drawingsXExtent, linefillPolygon } from './drawings.ts';
 
 /** Identity geometry: bar index is x, price is y, so the expected quad is readable by eye. */
 const geometry = {
@@ -42,4 +42,12 @@ test('an unresolvable or unplaceable line draws nothing', () => {
   assert.equal(linefillPolygon({ line1: 1, line2: 99 }, lines, geometry), null);
   const naY = new Map(lines).set(2, { ...bottom, y1: null });
   assert.equal(linefillPolygon({ line1: 1, line2: 2 }, naY, geometry), null);
+});
+
+test('drawingsXExtent spans both edges, including bars past the last candle', () => {
+  const drawings = [
+    { id: 1, type: 'box', props: { left: 2529, right: 2829, top: 1, bottom: 0 } },
+    { id: 2, type: 'box', props: { left: 2833, right: 2873, top: 1, bottom: 0 } },
+  ] as never;
+  assert.deepEqual(drawingsXExtent(drawings, []), { min: 2529, max: 2873 });
 });

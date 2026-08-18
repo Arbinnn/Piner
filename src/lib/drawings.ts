@@ -640,16 +640,23 @@ export function drawingsPriceExtent(drawings: readonly DrawObject[]): { min: num
 }
 
 /**
- * The right-most bar index the drawings occupy. Profile-style scripts deliberately draw
- * tens of bars past the last candle, which would otherwise sit outside the default view.
+ * The bar-index span the drawings occupy. Profile-style scripts deliberately draw tens of
+ * bars past the last candle, which would otherwise sit outside the default view — and the
+ * left edge matters too, because a view wide enough to hold every candle squeezes a
+ * 300-bar-wide profile into an unreadable sliver.
  */
-export function drawingsRightExtent(drawings: readonly DrawObject[], candles: readonly Candle[]): number | null {
-  let max: number | null = null;
+export function drawingsXExtent(
+  drawings: readonly DrawObject[],
+  candles: readonly Candle[],
+): { min: number; max: number } | null {
+  let min = Infinity;
+  let max = -Infinity;
   const consider = (raw: number | null, xloc: string): void => {
     if (raw === null) return;
     const logical = xloc === 'bar_index' ? raw : timeToLogical(candles, raw);
     if (!Number.isFinite(logical)) return;
-    if (max === null || logical > max) max = logical;
+    if (logical < min) min = logical;
+    if (logical > max) max = logical;
   };
 
   for (const d of drawings) {
@@ -665,5 +672,5 @@ export function drawingsRightExtent(drawings: readonly DrawObject[], candles: re
       consider(num(xloc === 'bar_index' ? p.index : p.time), xloc);
     }
   }
-  return max;
+  return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null;
 }
