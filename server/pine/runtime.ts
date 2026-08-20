@@ -52,6 +52,7 @@ export async function runScript(
       ...(opts.strategy ? { strategy: opts.strategy } : {}),
     });
     patchHtfTime(engine.ctx as unknown as Parameters<typeof patchHtfTime>[0]);
+    patchFormatSpecs(engine.ctx as unknown as StrContext);
     await engine.run({ symbol: opts.symbol, timeframe: opts.timeframe, mintick: opts.mintick });
     return {
       outputs: engine.outputs,
@@ -102,4 +103,33 @@ function readOpenLots(engine: Engine): OpenLotSnapshot[] {
     });
   }
   return lots;
+}
+
+/** The slice of a piner execution context `patchFormatSpecs` touches. */
+interface StrContext {
+  str: { tostring(x: unknown, fmt?: unknown): unknown };
+}
+
+/**
+ * Teaches `str.tostring` the named format specs.
+ *
+ * piner only understands numeric patterns (`"#.##"`), `format.mintick` and `format.volume`, so
+ * `str.tostring(x, format.percent)` — what every heat/oscillator dashboard labels its readout
+ * with — falls through to `String(x)` and prints `34.408602150537675` instead of `34.41%`.
+ *
+ * ponytail: percent and currency only; `format.price` needs the instrument precision the host
+ * does not track. Add it when a script's price labels look wrong.
+ */
+function patchFormatSpecs(ctx: StrContext): void {
+  const original = ctx.str.tostring.bind(ctx.str);
+  ctx.str = {
+    ...ctx.str,
+    tostring(x: unknown, fmt?: unknown): unknown {
+      if (typeof x === 'number' && Number.isFinite(x)) {
+        if (fmt === 'percent') return `${x.toFixed(2)}%`;
+        if (fmt === 'currency') return `$${x.toFixed(2)}`;
+      }
+      return original(x, fmt);
+    },
+  };
 }

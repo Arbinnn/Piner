@@ -20,6 +20,14 @@ interface TableCell {
   text_halign?: unknown;
   text_valign?: unknown;
   bgcolor?: unknown;
+  /** Pine sizes a cell as a % of the pane, not in pixels; 0/absent means "fit the text". */
+  width?: unknown;
+  height?: unknown;
+}
+
+/** A cell's explicit `width`/`height` in pixels, or 0 when it sizes itself from its text. */
+function cellSpan(raw: unknown, paneSpan: number): number {
+  return typeof raw === 'number' && raw > 0 ? (raw / 100) * paneSpan : 0;
 }
 
 function cellFontSize(cell: TableCell): number {
@@ -34,7 +42,9 @@ function cellLines(cell: TableCell): string[] {
 }
 
 function setFont(ctx: CanvasRenderingContext2D, size: number): void {
-  ctx.font = `${size}px system-ui, -apple-system, 'Segoe UI', sans-serif`;
+  // The emoji families are load-bearing: dashboard cells are full of ❄️/🔥/⚠️ and a text-only
+  // stack renders them as tofu boxes.
+  ctx.font = `${size}px system-ui, -apple-system, 'Segoe UI', sans-serif, 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji'`;
 }
 
 /**
@@ -82,8 +92,12 @@ export function drawTable(
       const lines = cellLines(cell);
       let widest = 0;
       for (const line of lines) widest = Math.max(widest, ctx.measureText(line).width);
-      colW[c] = Math.max(colW[c], widest + CELL_PAD_X * 2);
-      rowH[r] = Math.max(rowH[r], lines.length * (size + 3) + CELL_PAD_Y * 2);
+      // An explicit `width`/`height` is a pane percentage and wins over the measured text —
+      // that is what turns 51 empty cells into a full-width gradient bar instead of 51 blanks.
+      const fixedW = cellSpan(cell.width, paneW);
+      const fixedH = cellSpan(cell.height, paneH);
+      colW[c] = Math.max(colW[c], fixedW || widest + CELL_PAD_X * 2);
+      rowH[r] = Math.max(rowH[r], fixedH || lines.length * (size + 3) + CELL_PAD_Y * 2);
     }
   }
 

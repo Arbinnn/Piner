@@ -284,10 +284,25 @@ function rewriteShadowedColor(source: string): string {
     return source;
   }
 
+  // Paren depth per token: a `color =` inside a call is a named argument, never a declaration,
+  // even when the call wraps onto its own line and looks like a statement start.
+  const depth = new Array<number>(tokens.length).fill(0);
+  let open = 0;
+  for (let i = 0; i < tokens.length; i += 1) {
+    if (tokens[i].value === ')' || tokens[i].value === ']') open = Math.max(0, open - 1);
+    depth[i] = open;
+    if (tokens[i].value === '(' || tokens[i].value === '[') open += 1;
+  }
+
   /** True when the token begins a statement, i.e. is an assignment target rather than an argument name. */
   const isStatementStart = (i: number): boolean => {
+    if (depth[i] > 0) return false;
     const prev = tokens[i - 1];
-    return !prev || String(prev.kind) === 'Newline' || prev.value === 'var' || prev.value === 'varip';
+    if (!prev) return true;
+    // Indent/Dedent open a statement the same way a newline does — a `color = …` inside an
+    // `if`/`for` body is preceded by one of those, never by Newline.
+    const kind = String(prev.kind);
+    return kind === 'Newline' || kind === 'Indent' || kind === 'Dedent' || prev.value === 'var' || prev.value === 'varip';
   };
 
   const declaresColor = tokens.some(
@@ -309,6 +324,8 @@ function rewriteShadowedColor(source: string): string {
     const next = tokens[i + 1];
     // `color.new(...)` — the namespace, which must keep resolving as one.
     if (next?.value === '.') continue;
+    // `input.color(...)` — a member of another namespace that happens to be spelled `color`.
+    if (tokens[i - 1]?.value === '.') continue;
     // `color c = na` — a type annotation, not a reference to the variable.
     if (String(next?.kind) === 'Ident') continue;
     // `plot(x, color = ...)` — a named argument's key, which the callee matches by name.

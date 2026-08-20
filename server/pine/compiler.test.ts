@@ -109,3 +109,29 @@ test('a nested call inside a plot argument does not confuse the argument count',
   assert.equal(options.style, 'columns');
   assert.equal(options.linewidth, 3);
 });
+
+test('a `color` variable declared inside a block still routes `color.*` to the namespace', async () => {
+  // ChartPrime/LuxAlgo dashboards build their gradient inside a `for` body, where the shadowing
+  // variable is preceded by an Indent rather than a newline.
+  const colors = await plotColors(`//@version=6
+indicator("t")
+c = color.aqua
+if bar_index >= 0
+    color = color.red
+    c := color.new(color, 0)
+plot(close, color = c)
+`);
+  assert.equal(colors[0], '#F23645FF');
+});
+
+test('the `color` rewrite leaves `input.color(...)` and named `color =` arguments alone', async () => {
+  const colors = await plotColors(`//@version=6
+indicator("t")
+color picked = input.color(color.lime, "Line")
+if bar_index >= 0
+    color = color.red
+plot(close,
+   color = picked)
+`);
+  assert.equal(colors[0], '#00E676FF');
+});
